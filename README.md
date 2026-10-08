@@ -1,6 +1,6 @@
 # PULSE / OPS
 
-서버의 현재 문제와 위험 징후를 지표 옆에서 조사하는 모니터링 웹 프로젝트입니다. 상단 이벤트, 하단 7개 지표 구역, 사이드바 이동으로 구성합니다.
+서버의 현재 문제와 위험 징후를 조사하는 모니터링 웹 프로젝트입니다. 대시보드·이벤트·환경설정의 세 메뉴로 구성합니다. 첫 화면은 연결된 인프라 목록이며, 인프라를 선택하면 해당 대상만 조회하는 전용 대시보드 모달이 열립니다. 이벤트 메뉴는 감시 지표, 발생 조건과 지속 시간, 대시보드 표시 상태를 규칙별 한 행으로 보여줍니다.
 
 ## 실행
 
@@ -63,7 +63,7 @@ Host/HostName/User/Port/ProxyJump 및 Include 메타데이터만 파싱합니다
 ## 검증
 
 ```sh
-node --experimental-strip-types --test tests/monitoring.test.ts
+node --experimental-strip-types --test tests/monitoring.test.ts tests/workspace.test.ts
 python tests/ssh-discovery.test.py
 npx tsc --noEmit
 python scripts/verify-live.py

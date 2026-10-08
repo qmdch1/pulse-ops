@@ -1,0 +1,33 @@
+"use client";
+import {useState} from 'react';
+import {ArrowRight,Search,ChevronDown,ChevronUp,Radio} from 'lucide-react';
+import {Tabs,TabsList,TabsTrigger} from '@/components/ui/tabs';
+import {eventRules,ruleState} from '@/lib/monitoring/rule-catalog';
+import {metricById} from '@/lib/monitoring/catalog';
+import {formatNumber} from '@/lib/monitoring/rules';
+import type {Snapshot,Incident} from '@/lib/monitoring/types';
+import {fullTime} from './monitoring-chart';
+
+export const severityLabels={critical:'긴급',warning:'주의',notice:'평가 중'};
+export const kindLabels={detected:'이상 감지',predicted:'위험 예측',expiring:'만료',collection:'수집 상태'};
+export function IncidentRows({incidents,onOpen,limit=5}:{incidents:Incident[];onOpen:(i:Incident)=>void;limit?:number}){
+ return <div className="compact-incidents">{incidents.slice(0,limit).map(i=><button key={i.id} onClick={()=>onOpen(i)}><span className={'event-severity '+i.severity}>{severityLabels[i.severity]}</span><div><strong>{i.title}</strong><small>{i.scope==='선택 범위'?'전체 인프라':i.scope} · {kindLabels[i.kind]}</small></div><span className="incident-value">{i.value} <small>{i.unit}</small></span><ArrowRight size={15}/></button>)}</div>;
+}
+export function EventWorkspace({snapshot,incidents,onIncident}:{snapshot:Snapshot|null;incidents:Incident[];onIncident:(i:Incident)=>void}){
+ const [tab,setTab]=useState('rules'),[search,setSearch]=useState(''),[filter,setFilter]=useState('all'),[page,setPage]=useState(0),[expanded,setExpanded]=useState<string|null>(null);
+ const visible=eventRules.filter(r=>`${r.title} ${r.condition} ${r.metricIds.map(id=>metricById.get(id)?.title).join(' ')}`.toLowerCase().includes(search.toLowerCase())&&(filter==='all'||ruleState(r,snapshot,incidents)===filter));
+ const display=visible.slice(page*10,(page+1)*10);
+ const result=new Map(snapshot?.metrics.map(m=>[m.id,m])||[]);
+ return <>
+ <div className="event-flow"><div><span>01</span><strong>지표 관측</strong><small>응답·오류·리소스</small></div><ArrowRight size={17}/><div><span>02</span><strong>조건 교차 확인</strong><small>임계값과 지속 시간</small></div><ArrowRight size={17}/><div><span>03</span><strong>대시보드에 표시</strong><small>긴급·주의 이벤트</small></div></div>
+ <Tabs value={tab} onValueChange={setTab}><TabsList className="workspace-tabs"><TabsTrigger value="rules">감지 규칙 <span>{eventRules.length}</span></TabsTrigger><TabsTrigger value="active">현재 이벤트 <span>{incidents.length}</span></TabsTrigger><TabsTrigger value="history">발생·해제 이력</TabsTrigger></TabsList></Tabs>
+ {tab==='rules'&&<><div className="list-toolbar"><label className="search-field"><Search size={16}/><input aria-label="이벤트 규칙 검색" value={search} onChange={e=>{setSearch(e.target.value);setPage(0)}} placeholder="이벤트 이름, 지표, 조건 검색"/></label><select className="native-select" aria-label="이벤트 규칙 상태" value={filter} onChange={e=>{setFilter(e.target.value);setPage(0)}}><option value="all">모든 상태</option><option value="firing">대시보드 표시 중</option><option value="waiting">조건 평가 중</option><option value="missing">관측 부족</option></select></div>
+ <div className="rules-table-wrap"><table className="rules-table"><thead><tr><th>이벤트 규칙</th><th>함께 보는 지표</th><th>발생 조건 · 지속 시간</th><th>대시보드 표시</th><th aria-label="상세"/></tr></thead><tbody>{display.map(rule=>{const state=ruleState(rule,snapshot,incidents),open=expanded===rule.id;return <RuleRows key={rule.id} rule={rule} state={state} open={open} toggle={()=>setExpanded(open?null:rule.id)} result={result}/>})}</tbody></table>{!visible.length&&<p className="empty-search">일치하는 규칙이 없습니다.</p>}</div>
+ <div className="pagination"><span>{visible.length?`${visible.length}개 중 ${page*10+1}–${Math.min((page+1)*10,visible.length)}`:'0개'}</span><button disabled={page===0} onClick={()=>{setPage(p=>p-1);setExpanded(null)}}>이전</button><button disabled={(page+1)*10>=visible.length} onClick={()=>{setPage(p=>p+1);setExpanded(null)}}>다음</button></div><p className="table-explanation">조건 평가 중은 현재 표시할 이벤트가 없다는 뜻입니다. 정상 판정은 아니며, 지속 시간과 표본이 부족하면 이벤트를 만들지 않습니다.</p></>}
+ {tab==='active'&&<div className="surface active-events"><div className="surface-heading"><h2><Radio size={17}/> 지금 확인할 이벤트</h2><span>{incidents.length}개</span></div>{incidents.length?<IncidentRows incidents={incidents} onOpen={onIncident} limit={100}/>:<p className="empty-search">현재 표시할 이벤트가 없습니다.</p>}<p className="table-explanation">Prometheus에서 받은 경보도 포함됩니다. 평가 중인 경보는 발생 상태와 구분합니다.</p></div>}
+ {tab==='history'&&<div className="rules-table-wrap"><table className="history-table"><thead><tr><th>관측 시작 · KST</th><th>경보 / 대상</th><th>상태</th></tr></thead><tbody>{snapshot?.history?.map((h,i)=><tr key={`${h.name}-${h.startedAt}-${i}`}><td>{fullTime(h.startedAt)}</td><td><strong>{h.name}</strong><small>{h.instance}</small></td><td>{h.endedAt?`해제 관측 ${fullTime(h.endedAt)}`:'발생 중'}</td></tr>)}</tbody></table>{!snapshot?.history?.length&&<p className="empty-search">선택 기간에 관측된 Prometheus 경보 이력이 없습니다.</p>}<p className="table-explanation">Prometheus 경보 시계열의 표본 이력입니다. 화면에서 계산한 상관·예측 이벤트의 영구 이력은 포함하지 않습니다.</p></div>}
+ </>;
+}
+function RuleRows({rule,state,open,toggle,result}:{rule:typeof eventRules[number];state:ReturnType<typeof ruleState>;open:boolean;toggle:()=>void;result:Map<string,Snapshot['metrics'][number]>}){
+ return <><tr className={open?'expanded':''}><td><button className="rule-name" onClick={toggle} aria-expanded={open}><strong>{rule.title}</strong><small>{kindLabels[rule.kind]}</small></button></td><td><div className="rule-metrics">{rule.metricIds.length?rule.metricIds.map(id=><span key={id}>{metricById.get(id)?.title||id}{!rule.requiredIds.includes(id)&&<small>참고</small>}</span>):<span>Prometheus 연결 상태</span>}</div></td><td><p>{rule.condition}</p><small className="condition-duration">{rule.duration}</small></td><td><span className={'rule-status '+state}>{state==='firing'?`${severityLabels[rule.severity]} 표시 중`:state==='missing'?'관측 부족':state==='pending'?'지속 시간 확인 중':'조건 평가 중'}</span><small className="delivery-label">충족 시 {severityLabels[rule.severity]} 이벤트</small></td><td><button className="icon-button" aria-label={`${rule.title} 규칙 상세`} aria-expanded={open} onClick={toggle}>{open?<ChevronUp size={15}/>:<ChevronDown size={15}/>}</button></td></tr>{open&&<tr className="rule-expanded"><td colSpan={5}><div className="rule-detail"><div><strong>현재 관측값</strong><div>{rule.metricIds.map(id=>{const m=metricById.get(id),value=result.get(id);return <span key={id}>{m?.title}<b>{value?.latest!=null?`${formatNumber(value.latest)} ${m?.unit}`:'미관측'}</b></span>})}{!rule.metricIds.length&&<p>연결 실패 시 다른 지표의 마지막 값을 정상으로 재사용하지 않습니다.</p>}</div></div><p><ArrowRight size={15}/><span>조건과 지속 시간을 충족하면 <strong>대시보드 → 확인이 필요한 이벤트</strong>에 표시됩니다. 참고 지표는 원인 확인용이며 발생 조건에 자동으로 추가되지 않습니다.</span></p></div></td></tr>}</>;
+}

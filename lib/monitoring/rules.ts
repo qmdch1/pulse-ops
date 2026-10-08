@@ -17,37 +17,7 @@ export function slope(metric:MetricResult|undefined,minSeconds:number){
  for(const p of points){const x=p.time-start;sx+=x;sy+=p.value!;sxx+=x*x;sxy+=x*p.value!;}
  const denominator=n*sxx-sx*sx;return denominator>0?(n*sxy-sx*sy)/denominator:null;
 }
-export function detectIncidents(snapshot:Snapshot):Incident[]{
- const incidents:Incident[]=[];const map=new Map(snapshot.metrics.map(m=>[m.id,m]));
- const value=(id:string)=>map.get(id)?.latest??null;
- const holds=(id:string,p:(n:number)=>boolean,sec=120)=>sustained(map.get(id),p,sec,snapshot.end,snapshot.step);
- const add=(id:string,title:string,kind:Incident['kind'],severity:Incident['severity'],ids:string[],summary:string,steps:string[])=>{const m=metricById.get(ids[0]);const n=value(ids[0]);incidents.push({id,title,kind,severity,metricIds:ids,summary,steps,status:'firing',scope:'선택 범위',value:n===null?'—':formatNumber(n),unit:m?.unit||'',evidence:ids.map(k=>`${metricById.get(k)?.title||k}: ${value(k)===null?'미관측':formatNumber(value(k)!)} ${metricById.get(k)?.unit||''}`)});};
- if(!snapshot.connected){if(snapshot.mode!=='unconfigured')add('collector','수집기 연결 중단','collection','critical',[],'운영 상태를 판단할 수 없습니다. 마지막 값을 정상으로 간주하지 않습니다.',['Prometheus 연결과 인증 정보를 확인하세요.','수집기 네트워크와 접근 허용 목록을 확인하세요.']);return incidents;}
- if(holds('errors',n=>n>2))add('errors','서버 오류율 증가','detected','critical',['errors','p99','requests'],'5xx 비율이 2분 이상 2%를 초과했습니다. 실제 실패 범위를 먼저 확인하세요.',['실패 API와 최근 변경 버전을 확인하세요.','성공·실패 지연을 분리해 타임아웃과 빠른 실패를 구분하세요.']);
- if(holds('p99',n=>n>500))add('latency','꼬리 응답 지연 지속','detected','critical',['p99','cpu','pool-wait'],'P99가 2분 이상 500ms를 초과했습니다. 원인 후보는 추가 지표로 검증해야 합니다.',['CPU가 낮으면 DB·외부 호출·락 대기를 확인하세요.','CPU가 높으면 트래픽, 핫 프로세스, 스로틀링을 확인하세요.']);
- if(holds('pool-active',n=>n>80)&&holds('pool-wait',n=>n>100))add('pool','DB 커넥션 풀 병목 후보','detected','critical',['pool-active','pool-wait','db-latency'],'풀 사용률과 연결 대기가 함께 높습니다. 풀 증설보다 반환 지연의 원인을 확인하세요.',['슬로 쿼리와 잠금 대기를 점검하세요.','타임아웃, 요청 제한, 재시도 예산을 확인하세요.']);
- if(holds('p99',n=>n>500)&&value('cpu')!==null&&value('cpu')!<35)add('io','CPU 여유 상태의 지연 증가','detected','warning',['p99','cpu','db-latency'],'I/O, 잠금 또는 의존 서비스 대기가 원인 후보입니다.',['DB 쿼리 및 연결 대기를 확인하세요.','외부 호출 추적에서 대기 구간을 확인하세요.']);
- if(holds('errors',n=>n>2)&&value('p99')!==null&&value('p99')!<200)add('fast-fail','빠른 실패로 가려진 장애 후보','detected','critical',['errors','p99','failed-latency'],'오류는 증가했으나 지연은 낮습니다. 낮아진 P99를 회복으로 단정할 수 없습니다.',['연결 거부, 예외 로그와 배포 이력을 확인하세요.']);
- if(holds('throttling',n=>n>20)&&holds('p99',n=>n>500))add('throttle','CPU 제한과 꼬리 지연 동반','detected','warning',['throttling','p99','cpu'],'CPU 제한 주기와 응답 지연이 동시에 증가했습니다.',['컨테이너 CPU limit과 프로세스 사용량을 비교하세요.']);
- const leak=slope(map.get('gc-floor'),1800);
- if(leak!==null&&leak>1/60)add('leak','GC 이후 메모리 상승 추세','predicted','warning',['gc-floor','gc-pause','memory'],'30분 이상 관측에서 GC 후 메모리가 분당 1MiB 이상 증가합니다. RSS만으로 힙 누수를 확정할 수 없습니다.',['힙·네이티브 메모리 프로파일을 확보하세요.','배포 변경과 큰 요청의 시점을 비교하세요.']);
- if(holds('disk-forecast',n=>n<0,900))add('disk-risk','24시간 내 디스크 소진 가능','predicted','warning',['disk-forecast','disk-free','disk'],'6시간 선형 추세의 예측 결과가 15분간 음수입니다. 증가율 변화에 따라 결과가 달라집니다.',['로그·백업·임시 파일의 증가 원인을 확인하세요.','보존 정책 및 용량 확장을 계획하세요.']);
- const baseline=value('requests-week');if(baseline!==null&&baseline>1&&holds('requests',n=>n<baseline*.5))add('traffic-drop','평소 대비 트래픽 감소','detected','warning',['requests','requests-week','probe'],'지난주 동일 시각 대비 요청량이 절반 이하입니다. 계절성과 캠페인 영향을 함께 확인하세요.',['DNS, 게이트웨이, 로드밸런서 도달 여부를 점검하세요.']);
- if(baseline!==null&&baseline>1&&holds('requests',n=>n>baseline*2))add('traffic-spike','평소 대비 트래픽 급증','detected','warning',['requests','requests-week','retries'],'지난주 동일 시각 대비 2배를 초과했습니다.',['사용자 증가와 크롤러·재시도·정기 배치를 구분하세요.']);
- const old=value('p99-week');if(old!==null&&old>0&&holds('p99',n=>n>old*1.5))add('regression','주간 성능 저하 후보','predicted','warning',['p99','p99-week','requests'],'지난주 같은 시각 P99보다 50% 이상 높습니다.',['비슷한 부하에서 버전·쿼리·캐시 변화를 비교하세요.']);
- if(holds('cpu',n=>n>85)&&holds('p99',n=>n>500))add('cpu-pressure','CPU 포화와 응답 지연 동반','detected','critical',['cpu','p99','requests','requests-week'],'CPU 사용과 사용자 지연이 함께 높습니다.',['요청량이 증가했으면 처리 용량을 확인하세요.','동일 부하라면 배포된 코드와 프로파일을 확인하세요.']);
- const memory=map.get('memory')?.series[0]?.points.filter(p=>p.value!==null)||[];
- if(memory.length>=10&&memory.at(-1)!.time-memory[0].time>=300){const baselineMemory=memory.slice(0,Math.floor(memory.length/2)).reduce((s,p)=>s+p.value!,0)/Math.floor(memory.length/2);if(value('memory')!==null&&value('memory')!>baselineMemory+50&&value('memory')!>baselineMemory*1.5)add('memory-step','메모리 급상승 후보','detected','warning',['memory','inflight','gc-floor'],'최소 5분 관측의 앞 구간 평균보다 50MiB 및 50% 이상 상승했습니다.',['같은 시각의 대량 조회·파일 처리·다운로드 요청을 확인하세요.','페이지 처리 또는 스트리밍 가능 여부를 검토하세요.']);}
- const queueSlope=slope(map.get('queue'),300);if(queueSlope!==null&&queueSlope>.1&&holds('queue',n=>n>20))add('queue-growth','대기열 증가 지속','predicted','warning',['queue','queue-age','rejections'],'최소 5분간 초당 0.1개 이상 큐가 증가했습니다.',['유입률과 처리율의 차이, 소비자 상태를 확인하세요.','버퍼 상한과 배압을 점검하세요.']);
- const apiSeries=map.get('api-latency')?.series||[];const slowApis=apiSeries.filter(s=>{const last=s.points.at(-1);return last?.value!=null&&last.time>=snapshot.end-snapshot.step&&last.value>500});
- if(holds('api-latency',n=>n>500)&&slowApis.length){add('api-scope',slowApis.length===apiSeries.length?'관측 API 전반 지연':'특정 API 지연','detected','warning',['api-latency','db-latency','pool-wait'],`${apiSeries.length}개 관측 API 중 ${slowApis.length}개에서 현재 P99가 500ms를 초과합니다.`,[slowApis.length===apiSeries.length?'공유 DB·캐시·풀의 상태를 확인하세요.':'해당 API의 쿼리와 외부 호출을 확인하세요.']);}
- if(holds('targets-down',n=>n>0)&&holds('saturation',n=>n>80))add('cascade','서버 이탈과 처리 포화 동반','detected','critical',['targets-down','saturation','pool-active'],'수집 대상 이탈과 남은 처리 범위의 포화가 동반됩니다. 헬스체크 연쇄 실패는 추가 검증이 필요합니다.',['로드밸런서 헬스체크와 실제 요청 도달 여부를 확인하세요.','공유 의존 서비스와 재시도 증폭을 점검하세요.']);
- if(holds('cache-hit',n=>n<70)&&holds('db-latency',n=>n>100))add('stampede','캐시 저하와 DB 지연 동반','detected','warning',['cache-hit','db-latency','redis-expired'],'낮은 적중률과 쿼리 지연이 동반됩니다. 캐시 스탬피드는 원인 후보입니다.',['동시 TTL 만료와 축출량을 확인하세요.','키별 재생성 잠금·TTL 분산 정책을 검토하세요.']);
- if(holds('retries',n=>n>1)&&holds('errors',n=>n>2))add('retry-storm','실패·재시도 증폭 후보','detected','critical',['retries','errors','requests'],'재시도와 실패율이 함께 증가했습니다.',['재시도 총량, 지수 백오프와 지터를 확인하세요.']);
- if(value('timeout-db')!==null&&value('timeout-gateway')!==null&&value('timeout-db')!>=value('timeout-gateway')!)add('timeout','계층 타임아웃 예산 역전','detected','warning',['timeout-db','timeout-gateway','gateway-errors'],'DB 제한 시간이 게이트웨이보다 짧지 않습니다.',['애플리케이션·DB 제한을 바깥 계층보다 짧게 맞추세요.']);
- if(holds('slo-burn',n=>n>14.4)&&holds('slo-burn-hour',n=>n>14.4))add('slo','빠른 오류 예산 소진','predicted','critical',['slo-burn','slo-burn-hour','errors'],'99.9% 목표 기준 5분·1시간 창 모두 14.4배를 초과합니다.',['서비스별 승인 SLO 목표를 확인하세요.','변경 중단과 복구 우선순위를 검토하세요.']);
- if(value('deployment')!==null&&value('deployment')!<30&&holds('p99',n=>n>500,600))add('post-deploy','배포 후 지연 회복 지연','detected','warning',['deployment','p99','canary'],'최근 배포 이후 10분간 지연 기준을 초과했습니다.',['버전별·동일 부하로 카나리와 이전 버전을 비교하세요.','승인된 롤백 기준과 대조하세요.']);
- const simple:[string,string,(n:number)=>boolean,Incident['severity'],Incident['kind'],string][]=[
+export const simpleRules:[string,string,(n:number)=>boolean,Incident['severity'],Incident['kind'],string][]=[
  ['cookie-expiry','인증 세션 만료 임박 또는 만료',n=>n<60,'warning','expiring','관리 대상 세션의 갱신 경로와 절대 만료 시각을 확인하세요.'],
  ['tls-expiry','TLS 인증서 만료 임박',n=>n<14,'warning','expiring','인증서 체인과 자동 갱신 작업을 확인하세요.'],
  ['token-expiry','서비스 토큰 만료 임박',n=>n<24,'warning','expiring','서비스 계정 토큰의 안전한 교체를 준비하세요.'],
@@ -79,7 +49,37 @@ export function detectIncidents(snapshot:Snapshot):Incident[]{
  ['targets-down','지표 수집 대상 중단',n=>n>0,'critical','collection','대상 연결과 exporter 상태를 점검하세요.'],
  ['scrape-age','수집 데이터 신선도 저하',n=>n>45,'warning','collection','수집 주기와 대상 응답 시간을 확인하세요.'],
  ];
- for(const [id,title,test,severity,kind,step]of simple)if(holds(id,test,kind==='expiring'?30:60)){
+export function detectIncidents(snapshot:Snapshot):Incident[]{
+ const incidents:Incident[]=[];const map=new Map(snapshot.metrics.map(m=>[m.id,m]));
+ const value=(id:string)=>map.get(id)?.latest??null;
+ const holds=(id:string,p:(n:number)=>boolean,sec=120)=>sustained(map.get(id),p,sec,snapshot.end,snapshot.step);
+ const add=(id:string,title:string,kind:Incident['kind'],severity:Incident['severity'],ids:string[],summary:string,steps:string[])=>{const m=metricById.get(ids[0]);const n=value(ids[0]);incidents.push({id,title,kind,severity,metricIds:ids,summary,steps,status:'firing',scope:'선택 범위',value:n===null?'—':formatNumber(n),unit:m?.unit||'',evidence:ids.map(k=>`${metricById.get(k)?.title||k}: ${value(k)===null?'미관측':formatNumber(value(k)!)} ${metricById.get(k)?.unit||''}`)});};
+ if(!snapshot.connected){if(snapshot.mode!=='unconfigured')add('collector','수집기 연결 중단','collection','critical',[],'운영 상태를 판단할 수 없습니다. 마지막 값을 정상으로 간주하지 않습니다.',['Prometheus 연결과 인증 정보를 확인하세요.','수집기 네트워크와 접근 허용 목록을 확인하세요.']);return incidents;}
+ if(holds('errors',n=>n>2))add('errors','서버 오류율 증가','detected','critical',['errors','p99','requests'],'5xx 비율이 2분 이상 2%를 초과했습니다. 실제 실패 범위를 먼저 확인하세요.',['실패 API와 최근 변경 버전을 확인하세요.','성공·실패 지연을 분리해 타임아웃과 빠른 실패를 구분하세요.']);
+ if(holds('p99',n=>n>500))add('latency','꼬리 응답 지연 지속','detected','critical',['p99','cpu','pool-wait'],'P99가 2분 이상 500ms를 초과했습니다. 원인 후보는 추가 지표로 검증해야 합니다.',['CPU가 낮으면 DB·외부 호출·락 대기를 확인하세요.','CPU가 높으면 트래픽, 핫 프로세스, 스로틀링을 확인하세요.']);
+ if(holds('pool-active',n=>n>80)&&holds('pool-wait',n=>n>100))add('pool','DB 커넥션 풀 병목 후보','detected','critical',['pool-active','pool-wait','db-latency'],'풀 사용률과 연결 대기가 함께 높습니다. 풀 증설보다 반환 지연의 원인을 확인하세요.',['슬로 쿼리와 잠금 대기를 점검하세요.','타임아웃, 요청 제한, 재시도 예산을 확인하세요.']);
+ if(holds('p99',n=>n>500)&&value('cpu')!==null&&value('cpu')!<35)add('io','CPU 여유 상태의 지연 증가','detected','warning',['p99','cpu','db-latency'],'I/O, 잠금 또는 의존 서비스 대기가 원인 후보입니다.',['DB 쿼리 및 연결 대기를 확인하세요.','외부 호출 추적에서 대기 구간을 확인하세요.']);
+ if(holds('errors',n=>n>2)&&value('p99')!==null&&value('p99')!<200)add('fast-fail','빠른 실패로 가려진 장애 후보','detected','critical',['errors','p99','failed-latency'],'오류는 증가했으나 지연은 낮습니다. 낮아진 P99를 회복으로 단정할 수 없습니다.',['연결 거부, 예외 로그와 배포 이력을 확인하세요.']);
+ if(holds('throttling',n=>n>20)&&holds('p99',n=>n>500))add('throttle','CPU 제한과 꼬리 지연 동반','detected','warning',['throttling','p99','cpu'],'CPU 제한 주기와 응답 지연이 동시에 증가했습니다.',['컨테이너 CPU limit과 프로세스 사용량을 비교하세요.']);
+ const leak=slope(map.get('gc-floor'),1800);
+ if(leak!==null&&leak>1/60)add('leak','GC 이후 메모리 상승 추세','predicted','warning',['gc-floor','gc-pause','memory'],'30분 이상 관측에서 GC 후 메모리가 분당 1MiB 이상 증가합니다. RSS만으로 힙 누수를 확정할 수 없습니다.',['힙·네이티브 메모리 프로파일을 확보하세요.','배포 변경과 큰 요청의 시점을 비교하세요.']);
+ if(holds('disk-forecast',n=>n<0,900))add('disk-risk','24시간 내 디스크 소진 가능','predicted','warning',['disk-forecast','disk-free','disk'],'6시간 선형 추세의 예측 결과가 15분간 음수입니다. 증가율 변화에 따라 결과가 달라집니다.',['로그·백업·임시 파일의 증가 원인을 확인하세요.','보존 정책 및 용량 확장을 계획하세요.']);
+ const baseline=value('requests-week');if(baseline!==null&&baseline>1&&holds('requests',n=>n<baseline*.5))add('traffic-drop','평소 대비 트래픽 감소','detected','warning',['requests','requests-week','probe'],'지난주 동일 시각 대비 요청량이 절반 이하입니다. 계절성과 캠페인 영향을 함께 확인하세요.',['DNS, 게이트웨이, 로드밸런서 도달 여부를 점검하세요.']);
+ if(baseline!==null&&baseline>1&&holds('requests',n=>n>baseline*2))add('traffic-spike','평소 대비 트래픽 급증','detected','warning',['requests','requests-week','retries'],'지난주 동일 시각 대비 2배를 초과했습니다.',['사용자 증가와 크롤러·재시도·정기 배치를 구분하세요.']);
+ const old=value('p99-week');if(old!==null&&old>0&&holds('p99',n=>n>old*1.5))add('regression','주간 성능 저하 후보','predicted','warning',['p99','p99-week','requests'],'지난주 같은 시각 P99보다 50% 이상 높습니다.',['비슷한 부하에서 버전·쿼리·캐시 변화를 비교하세요.']);
+ if(holds('cpu',n=>n>85)&&holds('p99',n=>n>500))add('cpu-pressure','CPU 포화와 응답 지연 동반','detected','critical',['cpu','p99','requests','requests-week'],'CPU 사용과 사용자 지연이 함께 높습니다.',['요청량이 증가했으면 처리 용량을 확인하세요.','동일 부하라면 배포된 코드와 프로파일을 확인하세요.']);
+ const memory=map.get('memory')?.series[0]?.points.filter(p=>p.value!==null)||[];
+ if(memory.length>=10&&memory.at(-1)!.time-memory[0].time>=300){const baselineMemory=memory.slice(0,Math.floor(memory.length/2)).reduce((s,p)=>s+p.value!,0)/Math.floor(memory.length/2);if(value('memory')!==null&&value('memory')!>baselineMemory+50&&value('memory')!>baselineMemory*1.5)add('memory-step','메모리 급상승 후보','detected','warning',['memory','inflight','gc-floor'],'최소 5분 관측의 앞 구간 평균보다 50MiB 및 50% 이상 상승했습니다.',['같은 시각의 대량 조회·파일 처리·다운로드 요청을 확인하세요.','페이지 처리 또는 스트리밍 가능 여부를 검토하세요.']);}
+ const queueSlope=slope(map.get('queue'),300);if(queueSlope!==null&&queueSlope>.1&&holds('queue',n=>n>20))add('queue-growth','대기열 증가 지속','predicted','warning',['queue','queue-age','rejections'],'최소 5분간 초당 0.1개 이상 큐가 증가했습니다.',['유입률과 처리율의 차이, 소비자 상태를 확인하세요.','버퍼 상한과 배압을 점검하세요.']);
+ const apiSeries=map.get('api-latency')?.series||[];const slowApis=apiSeries.filter(s=>{const last=s.points.at(-1);return last?.value!=null&&last.time>=snapshot.end-snapshot.step&&last.value>500});
+ if(holds('api-latency',n=>n>500)&&slowApis.length){add('api-scope',slowApis.length===apiSeries.length?'관측 API 전반 지연':'특정 API 지연','detected','warning',['api-latency','db-latency','pool-wait'],`${apiSeries.length}개 관측 API 중 ${slowApis.length}개에서 현재 P99가 500ms를 초과합니다.`,[slowApis.length===apiSeries.length?'공유 DB·캐시·풀의 상태를 확인하세요.':'해당 API의 쿼리와 외부 호출을 확인하세요.']);}
+ if(holds('targets-down',n=>n>0)&&holds('saturation',n=>n>80))add('cascade','서버 이탈과 처리 포화 동반','detected','critical',['targets-down','saturation','pool-active'],'수집 대상 이탈과 남은 처리 범위의 포화가 동반됩니다. 헬스체크 연쇄 실패는 추가 검증이 필요합니다.',['로드밸런서 헬스체크와 실제 요청 도달 여부를 확인하세요.','공유 의존 서비스와 재시도 증폭을 점검하세요.']);
+ if(holds('cache-hit',n=>n<70)&&holds('db-latency',n=>n>100))add('stampede','캐시 저하와 DB 지연 동반','detected','warning',['cache-hit','db-latency','redis-expired'],'낮은 적중률과 쿼리 지연이 동반됩니다. 캐시 스탬피드는 원인 후보입니다.',['동시 TTL 만료와 축출량을 확인하세요.','키별 재생성 잠금·TTL 분산 정책을 검토하세요.']);
+ if(holds('retries',n=>n>1)&&holds('errors',n=>n>2))add('retry-storm','실패·재시도 증폭 후보','detected','critical',['retries','errors','requests'],'재시도와 실패율이 함께 증가했습니다.',['재시도 총량, 지수 백오프와 지터를 확인하세요.']);
+ if(value('timeout-db')!==null&&value('timeout-gateway')!==null&&value('timeout-db')!>=value('timeout-gateway')!)add('timeout','계층 타임아웃 예산 역전','detected','warning',['timeout-db','timeout-gateway','gateway-errors'],'DB 제한 시간이 게이트웨이보다 짧지 않습니다.',['애플리케이션·DB 제한을 바깥 계층보다 짧게 맞추세요.']);
+ if(holds('slo-burn',n=>n>14.4)&&holds('slo-burn-hour',n=>n>14.4))add('slo','빠른 오류 예산 소진','predicted','critical',['slo-burn','slo-burn-hour','errors'],'99.9% 목표 기준 5분·1시간 창 모두 14.4배를 초과합니다.',['서비스별 승인 SLO 목표를 확인하세요.','변경 중단과 복구 우선순위를 검토하세요.']);
+ if(value('deployment')!==null&&value('deployment')!<30&&holds('p99',n=>n>500,600))add('post-deploy','배포 후 지연 회복 지연','detected','warning',['deployment','p99','canary'],'최근 배포 이후 10분간 지연 기준을 초과했습니다.',['버전별·동일 부하로 카나리와 이전 버전을 비교하세요.','승인된 롤백 기준과 대조하세요.']);
+ for(const [id,title,test,severity,kind,step]of simpleRules)if(holds(id,test,kind==='expiring'?30:60)){
   add(id,title,kind,severity,[id],'선택 범위에서 기준 초과가 지속 관측되었습니다.',[step]);
   if(kind==='expiring'&&value(id)!==null){const factor=id==='cookie-expiry'?60:id==='tls-expiry'?86400:3600;incidents.at(-1)!.evidence.push(`만료 시각: ${new Date((snapshot.end+value(id)!*factor)*1000).toISOString()} (UTC)`);}
  }
