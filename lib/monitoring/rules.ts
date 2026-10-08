@@ -30,8 +30,8 @@ export const simpleRules:[string,string,(n:number)=>boolean,Incident['severity']
  ['disk','디스크 용량 압박',n=>n>85,'warning','detected','마운트별 여유 공간과 파일 증가량을 확인하세요.'],
  ['inode','inode 소진 위험',n=>n>90,'warning','detected','작은 파일 증가와 보존 정책을 확인하세요.'],
  ['file-descriptors','파일·소켓 한계 접근',n=>n>80,'warning','detected','연결 해제 누락과 파일 디스크립터 한계를 점검하세요.'],
- ['db-up','PostgreSQL 연결 실패',n=>n<1,'critical','detected','DB 서비스 상태와 exporter 계정 접근을 확인하세요.'],
- ['redis-up','Redis 연결 실패',n=>n<1,'critical','detected','Redis 서비스 상태와 exporter 계정 접근을 확인하세요.'],
+ ['db-up','PostgreSQL 연결 실패',n=>n<1,'critical','detected','DB 서비스 상태와 등록한 계정 접근을 확인하세요.'],
+ ['redis-up','Redis 연결 실패',n=>n<1,'critical','detected','Redis 서비스 상태와 등록한 계정 접근을 확인하세요.'],
  ['db-replication','DB 복제 지연',n=>n>30,'warning','detected','복제 네트워크와 WAL 적용 지연을 점검하세요.'],
  ['db-deadlocks','DB 데드락 발생',n=>n>0,'warning','detected','잠금 순서와 트랜잭션 경계를 확인하세요.'],
  ['db-rollback','DB 트랜잭션 롤백 증가',n=>n>5,'warning','detected','애플리케이션 예외와 트랜잭션 실패 사유를 확인하세요.'],
@@ -46,7 +46,7 @@ export const simpleRules:[string,string,(n:number)=>boolean,Incident['severity']
  ['clock-skew','시스템 시계 편차',n=>n>1,'warning','detected','시간 동기화 서비스 상태를 확인하세요.'],
  ['network-drop','네트워크 패킷 드롭',n=>n>1,'warning','detected','NIC 큐·버퍼와 네트워크 혼잡을 확인하세요.'],
  ['tcp-retry','TCP 재전송 증가',n=>n>1,'warning','detected','연결 손실과 혼잡을 점검하세요.'],
- ['targets-down','지표 수집 대상 중단',n=>n>0,'critical','collection','대상 연결과 exporter 상태를 점검하세요.'],
+ ['targets-down','지표 수집 대상 중단',n=>n>0,'critical','collection','등록 대상 연결과 수집 상태를 점검하세요.'],
  ['scrape-age','수집 데이터 신선도 저하',n=>n>45,'warning','collection','수집 주기와 대상 응답 시간을 확인하세요.'],
  ];
 export function detectIncidents(snapshot:Snapshot):Incident[]{
@@ -54,7 +54,7 @@ export function detectIncidents(snapshot:Snapshot):Incident[]{
  const value=(id:string)=>map.get(id)?.latest??null;
  const holds=(id:string,p:(n:number)=>boolean,sec=120)=>sustained(map.get(id),p,sec,snapshot.end,snapshot.step);
  const add=(id:string,title:string,kind:Incident['kind'],severity:Incident['severity'],ids:string[],summary:string,steps:string[])=>{const m=metricById.get(ids[0]);const n=value(ids[0]);incidents.push({id,title,kind,severity,metricIds:ids,summary,steps,status:'firing',scope:'선택 범위',value:n===null?'—':formatNumber(n),unit:m?.unit||'',evidence:ids.map(k=>`${metricById.get(k)?.title||k}: ${value(k)===null?'미관측':formatNumber(value(k)!)} ${metricById.get(k)?.unit||''}`)});};
- if(!snapshot.connected){if(snapshot.mode!=='unconfigured')add('collector','수집기 연결 중단','collection','critical',[],'운영 상태를 판단할 수 없습니다. 마지막 값을 정상으로 간주하지 않습니다.',['Prometheus 연결과 인증 정보를 확인하세요.','수집기 네트워크와 접근 허용 목록을 확인하세요.']);return incidents;}
+ if(!snapshot.connected){if(snapshot.mode!=='unconfigured')add('collector','수집기 연결 중단','collection','critical',[],'운영 상태를 판단할 수 없습니다. 마지막 값을 정상으로 간주하지 않습니다.',['Go 인프라 관리 서비스 연결을 확인하세요.','수집기 네트워크와 접근 허용 목록을 확인하세요.']);return incidents;}
  if(holds('errors',n=>n>2))add('errors','서버 오류율 증가','detected','critical',['errors','p99','requests'],'5xx 비율이 2분 이상 2%를 초과했습니다. 실제 실패 범위를 먼저 확인하세요.',['실패 API와 최근 변경 버전을 확인하세요.','성공·실패 지연을 분리해 타임아웃과 빠른 실패를 구분하세요.']);
  if(holds('p99',n=>n>500))add('latency','꼬리 응답 지연 지속','detected','critical',['p99','cpu','pool-wait'],'P99가 2분 이상 500ms를 초과했습니다. 원인 후보는 추가 지표로 검증해야 합니다.',['CPU가 낮으면 DB·외부 호출·락 대기를 확인하세요.','CPU가 높으면 트래픽, 핫 프로세스, 스로틀링을 확인하세요.']);
  if(holds('pool-active',n=>n>80)&&holds('pool-wait',n=>n>100))add('pool','DB 커넥션 풀 병목 후보','detected','critical',['pool-active','pool-wait','db-latency'],'풀 사용률과 연결 대기가 함께 높습니다. 풀 증설보다 반환 지연의 원인을 확인하세요.',['슬로 쿼리와 잠금 대기를 점검하세요.','타임아웃, 요청 제한, 재시도 예산을 확인하세요.']);

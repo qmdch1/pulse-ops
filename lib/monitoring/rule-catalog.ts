@@ -5,7 +5,8 @@ import type {Incident,Snapshot} from './types';
 export type RuleDefinition={id:string;title:string;metricIds:string[];condition:string;duration:string;severity:Incident['severity'];kind:Incident['kind'];requiredIds:string[]};
 const rule=(id:string,title:string,ids:string[],condition:string,duration:string,severity:Incident['severity']='warning',kind:Incident['kind']='detected',requiredIds=ids):RuleDefinition=>({id,title,metricIds:ids,condition,duration,severity,kind,requiredIds});
 export const eventRules:RuleDefinition[]=[
- rule('collector','수집기 연결 중단',[],'설정된 Prometheus에 연결할 수 없음','즉시','critical','collection'),
+ rule('collector','수집기 연결 중단',[],'Go 인프라 관리 서비스에 연결할 수 없음','즉시','critical','collection'),
+ rule('connection','등록 인프라 연결 실패',['targets-down'],'등록된 대상의 최근 연결 시도가 실패함','최근 실패 즉시 · 재시도 최대 5분','critical','collection'),
  rule('errors','서버 오류율 증가',['errors','p99','requests'],'5xx 비율 > 2%','2분 지속','critical','detected',['errors']),
  rule('latency','꼬리 응답 지연 지속',['p99','cpu','pool-wait'],'P99 > 500ms','2분 지속','critical','detected',['p99']),
  rule('pool','DB 커넥션 풀 병목 후보',['pool-active','pool-wait','db-latency'],'풀 사용률 > 80% AND 연결 대기 > 100ms','각 2분 지속','critical','detected',['pool-active','pool-wait']),
@@ -34,9 +35,10 @@ export const eventRules:RuleDefinition[]=[
 ];
 export const ruleById=new Map(eventRules.map(rule=>[rule.id,rule]));
 export function ruleState(rule:RuleDefinition,snapshot:Snapshot|null,incidents:Incident[]):'firing'|'pending'|'waiting'|'missing'{
- if(incidents.some(i=>i.id===rule.id&&i.status==='firing'))return 'firing';
- if(incidents.some(i=>i.id===rule.id&&i.status==='pending'))return 'pending';
+ if(incidents.some(i=>(i.ruleId||i.id)===rule.id&&i.status==='firing'))return 'firing';
+ if(incidents.some(i=>(i.ruleId||i.id)===rule.id&&i.status==='pending'))return 'pending';
  if(!snapshot||snapshot.mode==='unconfigured'||!snapshot.connected)return 'missing';
+ if(snapshot.assets&&snapshot.assets.length>1)return snapshot.assets.some(a=>a.enabled&&rule.requiredIds.every(id=>snapshot.metrics.find(m=>m.id===id)?.series.some(s=>s.labels.assetId===a.id&&s.points.at(-1)?.value!=null&&snapshot.end-s.points.at(-1)!.time<=45)))?'waiting':'missing';
  const observed=new Set(snapshot.metrics.filter(m=>m.state==='ok').map(m=>m.id));
  return rule.requiredIds.every(id=>observed.has(id))?'waiting':'missing';
 }

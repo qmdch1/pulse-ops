@@ -1,4 +1,4 @@
-import {readSnapshot} from '@/lib/monitoring/prometheus';
+import {readNativeSnapshot as readSnapshot} from '@/lib/monitoring/control';
 import {authorize} from '@/lib/monitoring/auth';
 export const dynamic='force-dynamic';
 export async function GET(request:Request){

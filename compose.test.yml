@@ -101,14 +101,50 @@ services:
     profiles: [dashboard]
     environment:
       MONITORING_MODE: test
-      PROMETHEUS_URL: http://prometheus:9090
+      CONTROL_PLANE_URL: http://control-plane:7080
+      CONTROL_API_TOKEN: pulse_isolated_test_service_token_32chars
       GRAFANA_PUBLIC_URL: http://localhost:13001
       SSH_INVENTORY_FILE: /app/config/ssh-inventory.json
     volumes: [./.local/ssh-inventory.json:/app/config/ssh-inventory.json:ro]
-    ports: ['127.0.0.1:13000:3000']
+
     mem_limit: 384m
-    depends_on: [prometheus]
+    depends_on: [control-plane]
+  control-plane:
+    build:
+      context: ./control-plane
+      args: {GO_BUILD_TAGS: testseed}
+    profiles: [dashboard]
+    environment:
+      MONITORING_MODE: test
+      CONTROL_TEST_SEED: 'true'
+      CONTROL_API_TOKEN: pulse_isolated_test_service_token_32chars
+      CONTROL_ALLOWED_ORIGINS: http://localhost:13000,http://127.0.0.1:13000
+    volumes: [test-registry:/data, test-ssh:/test-ssh:ro]
+    depends_on: [demo-api, postgres, redis, frontend, test-bastion, test-node]
+    mem_limit: 256m
+  gateway:
+    image: nginx:1.28.0-alpine
+    profiles: [dashboard]
+    volumes: [./monitoring/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro]
+    ports: ['127.0.0.1:13000:8080']
+    depends_on: [dashboard, control-plane]
+    mem_limit: 64m
+  test-bastion:
+    build: ./monitoring/test-ssh
+    profiles: [dashboard]
+    environment: {HOST_ID: bastion}
+    volumes: [test-ssh:/keys]
+    mem_limit: 64m
+  test-node:
+    build: ./monitoring/test-ssh
+    profiles: [dashboard]
+    environment: {HOST_ID: node}
+    volumes: [test-ssh:/keys]
+    depends_on: [test-bastion]
+    mem_limit: 64m
 volumes:
+  test-registry:
+  test-ssh:
   test-postgres:
   test-prometheus:
   test-alertmanager:

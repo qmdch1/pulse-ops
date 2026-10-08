@@ -102,6 +102,14 @@ add('changes','alert-count','활성 경보 수','개',`count(ALERTS${s('alertsta
 add('runtime','process-cpu','프로세스별 CPU','%',`app_process_cpu_percent${s()}`,'프로세스 평균에 숨겨진 특정 인스턴스의 부하를 확인합니다.','Application',85);
 add('network','timeouts','요청 타임아웃','회/s',rate('app_request_timeouts_total'),'서버 요청 타임아웃을 실패·재시도와 함께 확인합니다.','Application',0);
 add('changes','clock-health','시간 동기화 상태','0/1',`min(node_timex_sync_status${s()})`,'시스템 시간 동기화의 성공 여부입니다.','Node exporter',1,'below');
+add('database','db-probe','DB 읽기 응답 시간','ms','','관리 서비스에서 SELECT 1을 실행한 왕복 시간. 실제 업무 쿼리 P99와 구분합니다.','직접 수집');
+add('database','db-transactions','DB 트랜잭션 처리량','회/s','','15초 수집 간격의 커밋과 롤백 변화율입니다.','직접 수집');
+add('database','redis-probe','Redis PING 응답 시간','ms','','관리 서비스와 Redis 사이의 PING 왕복 시간입니다.','직접 수집');
+add('network','http-status','HTTP 응답 코드','code','','등록 URL이 실제로 반환한 HTTP 상태 코드입니다.','직접 수집');
+add('resources','uptime','호스트 가동 시간','s','','SSH로 확인한 운영체제 가동 시간입니다.','직접 수집');
+add('database','redis-used','Redis 사용 메모리','MiB','','INFO used_memory 현재 값입니다.','직접 수집');
+add('database','redis-clients','Redis 연결 클라이언트','개','','INFO connected_clients 현재 값입니다.','직접 수집');
+add('database','redis-commands','Redis 처리 명령','회/s','','15초 수집 간격의 처리 명령 변화율입니다.','직접 수집');
 export const metrics: readonly Metric[]=entries;
 export const metricById=new Map(metrics.map(m=>[m.id,m]));
 export const groupLabels:Record<Group,string>={golden:'트래픽 & 응답',resources:'서버 리소스',runtime:'런타임 & 프로세스',database:'데이터베이스 & 캐시',network:'네트워크 & 큐',security:'인증 & 만료',changes:'배포 & 신뢰성'};

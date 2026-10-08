@@ -50,3 +50,5 @@ next-env.d.ts
 /.codex/
 /outputs/
 /work/
+/control-plane/data/
+/control-plane/pulse-control*
