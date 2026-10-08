@@ -1,85 +1,426 @@
-"""Optional documentation renderer; Pillow is not an application dependency."""
+"""Render the README architecture animation as light/dark SVG files.
+
+Documentation tool only: standard library, no Pillow, browser or Node.
+The SVG uses SMIL so it animates inside a GitHub README <img>. Timings show
+logical order, not real latency or throughput.
+"""
 from pathlib import Path
-import math
-from PIL import Image, ImageDraw, ImageFont
+from xml.sax.saxutils import escape
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'docs' / 'images'
-OUT.mkdir(parents=True, exist_ok=True)
-W, H = 1400, 860
-BG, PANEL, LINE = '#121722', '#1b2433', '#35445c'
-TEXT, MUTED = '#e4eaf5', '#9aaac4'
-PURPLE, MINT, BLUE, AMBER = '#baa4f5', '#77d8ba', '#79b9ed', '#efbd81'
+W, H, T = 1200, 740, 27.0
+EASE = '0.65 0 0.35 1'      # ease-in-out cubic for packet travel
+FADE = '0.33 0 0.2 1'       # soft ease for highlights
 
-def font(size, bold=False):
-    names = [Path('C:/Windows/Fonts/segoeuib.ttf' if bold else 'C:/Windows/Fonts/segoeui.ttf'), Path('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf' if bold else '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')]
-    return ImageFont.truetype(str(next(p for p in names if p.exists())), size)
+THEMES = {
+    'light': dict(
+        bg='#ffffff', panel='#f8f9fa', block='#ffffff', border='#e9ecef', edge='#dee2e6', lane='#ced4da',
+        text='#212529', body='#495057', muted='#868e96', faint='#adb5bd', screen='#212529', screen_text='#f8f9fa', on='#ffffff',
+        violet='#7950f2', blue='#228be6', green='#2f9e44', amber='#f08c00', red='#e03131',
+        violet_ink='#6741d9', blue_ink='#1971c2', green_ink='#2b8a3e', amber_ink='#d9480f', tint='0.07'),
+    'dark': dict(
+        bg='#0d1117', panel='#161b22', block='#0d1117', border='#21262d', edge='#30363d', lane='#3d444d',
+        text='#e6edf3', body='#c9d1d9', muted='#8b949e', faint='#6e7681', screen='#010409', screen_text='#e6edf3', on='#0d1117',
+        violet='#9775fa', blue='#4dabf7', green='#51cf66', amber='#ffa94d', red='#ff8787',
+        violet_ink='#b197fc', blue_ink='#74c0fc', green_ink='#8ce99a', amber_ink='#ffc078', tint='0.12'),
+}
 
-def box(d, rect, tag, title, lines, color=PURPLE):
-    x, y, right, bottom = rect
-    d.rounded_rectangle(rect, radius=15, fill=PANEL, outline=LINE, width=2)
-    d.rounded_rectangle((x+21,y+24,x+25,bottom-24),radius=2,fill=color)
-    d.text((x+43,y+21),tag,font=font(11,True),fill=color)
-    d.text((x+43,y+43),title,font=font(23,True),fill=TEXT)
-    for i,line in enumerate(lines):d.text((x+43,y+82+25*i),line,font=font(14),fill=MUTED)
-
-PATHS = [
- ([(330,236),(475,236)],PURPLE,'HTTPS / UI + JSON'),
- ([(475,274),(330,274)],PURPLE,''),
- ([(330,365),(475,365)],AMBER,'WSS / terminal'),
- ([(865,232),(1020,232)],MINT,'SSH / jump'),
- ([(1020,264),(865,264)],MINT,''),
- ([(865,405),(1020,405)],BLUE,'SQL / PING / HTTP'),
- ([(1020,437),(865,437)],BLUE,''),
- ([(650,525),(650,635)],MINT,'commit / read'),
- ([(706,635),(706,525)],PURPLE,''),
+PHASES = [  # (start, end, color, pill label, caption)
+    (0.0, 4.4, 'violet', '① 화면 로드', 'Go가 실행 파일에 내장한 HTML·CSS·ES 모듈을 gzip·ETag로 내려 줍니다.'),
+    (4.4, 11.6, 'blue', '② 화면 갱신', 'Worker가 /api/monitoring을 읽습니다. 3초 안의 같은 조회는 공유 캐시로 답하고 수집을 호출하지 않습니다.'),
+    (11.6, 18.8, 'green', '③ 15초 수집', '화면과 무관하게 15초마다 실행합니다. 슬롯 4개가 차면 다음 대상은 빈 슬롯을 기다리고, 결과는 SQLite에 저장합니다.'),
+    (18.8, T, 'amber', '④ 터미널', '30초 단회 티켓으로 WebSocket을 연 뒤 Go가 SSH PTY를 중계합니다. 감사 기록에는 연결·종료만 남습니다.'),
 ]
 
-def arrow(d, points, color, width=2):
-    d.line(points,fill=color,width=width)
-    a,b=points[-2:]; angle=math.atan2(b[1]-a[1],b[0]-a[0]);length=8
-    d.polygon([b,(b[0]-length*math.cos(angle-.45),b[1]-length*math.sin(angle-.45)),(b[0]-length*math.cos(angle+.45),b[1]-length*math.sin(angle+.45))],fill=color)
+# Geometry -----------------------------------------------------------------
+PANEL_Y, PANEL_H = 120, 395
+BROWSER, GO, INFRA = (40, 260), (450, 340), (900, 260)        # x, width
+XTERM, UI, WORKER = (58, 155, 224, 60), (58, 240, 224, 90), (58, 355, 224, 90)
+TERM, STATIC = (470, 158, 300, 54), (470, 250, 300, 50)
+API, SCHED = (470, 340, 142, 160), (628, 340, 142, 160)
+SQLITE = (470, 572, 300, 70)
+SERVER, DB, REDIS, HTTP, APP = [(916, y, 228, h) for y, h in ((155, 80), (247, 52), (311, 52), (375, 52), (439, 52))]
+SLOT_X, SLOT_YS, QUEUE = 744, (362, 388, 414, 440), (753, 480)
+LEFT_GAP, RIGHT_GAP = (282, 470), (770, 916)
 
-def scene():
-    im=Image.new('RGB',(W,H),BG);d=ImageDraw.Draw(im)
-    d.text((48,32),'PULSE / OPS',font=font(15,True),fill=PURPLE)
-    d.text((48,63),'One Go service. Direct infrastructure visibility.',font=font(33,True),fill=TEXT)
-    d.text((48,112),'Embedded native web UI  /  Same-origin API  /  Bounded collectors  /  Encrypted credentials',font=font(16),fill=MUTED)
-    box(d,(48,189,330,486),'BROWSER','Native web', ['HTML + CSS + ES modules','Canvas time-series charts','Worker: fetch + rule checks','Drag, merge, split graphs','xterm loaded on demand'])
-    box(d,(475,189,865,525),'ONE PROCESS / ONE CONTAINER','Go service', ['HTTP/TLS + static gzip / ETag','Basic auth + exact-origin writes','Registry API + snapshot cache','15s scheduler / 4 collector slots','One-time ticket -> SSH PTY','No Node, bundler or gateway'])
-    box(d,(1020,189,1352,321),'REGISTERED INFRASTRUCTURE','Servers', ['Linux / Windows / macOS','Pinned SSH key + optional jump'],MINT)
-    box(d,(1020,352,1352,515),'REGISTERED INFRASTRUCTURE','DB / cache / apps', ['PostgreSQL / MySQL / MariaDB','Oracle / Redis / HTTP','App metrics: direct collection'],BLUE)
-    box(d,(475,635,865,768),'PERSISTENT LOCAL VOLUME','SQLite', ['AES-GCM registry / plain observations','Collection / connection / terminal audit'],MINT)
-    d.text((48,554),'APP DEPLOYMENT',font=font(11,True),fill=PURPLE)
-    d.text((48,581),'Single binary or single container',font=font(17,True),fill=TEXT)
-    d.text((48,610),'TLS: Go certificates or your existing',font=font(14),fill=MUTED)
-    d.text((48,633),'HTTPS ingress -> loopback :13000',font=font(14),fill=MUTED)
-    d.text((1020,567),'INDEPENDENT TIMING',font=font(11,True),fill=MINT)
-    d.text((1020,596),'Browser refresh: 1-3600s / chart',font=font(14),fill=TEXT)
-    d.text((1020,622),'Actual collection: every 15s',font=font(14),fill=TEXT)
-    d.text((1020,650),'Refresh does not trigger collection.',font=font(13),fill=MUTED)
-    d.text((1020,675),'Missing samples remain gaps.',font=font(13),fill=MUTED)
-    for points,color,label in PATHS:
-        arrow(d,points,LINE,3)
-        if label:
-            x=(points[0][0]+points[-1][0])/2;y=(points[0][1]+points[-1][1])/2
-            if points[0][0]==points[-1][0]:d.text((x-135,y-10),label,font=font(12),fill=color)
-            else:d.text((x,y-22),label,font=font(11),fill=color,anchor='mm')
-    d.line((48,798,1352,798),fill=LINE)
-    for x,color,label in [(48,PURPLE,'UI / snapshots'),(320,MINT,'SSH / stored observations'),(690,BLUE,'Direct database / app metrics'),(1100,AMBER,'Interactive SSH terminal')]:
-        d.ellipse((x,822,x+7,829),fill=color);d.text((x+16,815),label,font=font(12),fill=MUTED)
-    return im
 
-base=scene();base.save(OUT/'architecture.png',optimize=True)
-frames=[]
-for frame in range(60):
-    im=base.copy();d=ImageDraw.Draw(im)
-    for index,(points,color,_) in enumerate(PATHS):
-        start,end=points;phase=(frame/30+index*.13)%1
-        for delay in (0,.37):
-            p=(phase+delay)%1;x=start[0]+(end[0]-start[0])*p;y=start[1]+(end[1]-start[1])*p
-            d.ellipse((x-8,y-8,x+8,y+8),fill=BG,outline=color,width=1)
-            d.ellipse((x-4,y-4,x+4,y+4),fill=color)
-    frames.append(im.resize((1120,688),Image.Resampling.LANCZOS).convert('P',palette=Image.Palette.ADAPTIVE,colors=96))
-frames[0].save(OUT/'traffic-flow.gif',save_all=True,append_images=frames[1:],duration=90,loop=0,optimize=False,disposal=2)
-print('Architecture PNG and 60-frame traffic GIF created.')
+def num(v):
+    return f'{v:.4f}'.rstrip('0').rstrip('.')
+
+
+def keytimes(times):
+    for a, b in zip(times, times[1:]):
+        if b < a - 1e-9:
+            raise ValueError(f'non-monotonic key times: {times}')
+    return ';'.join(num(t / T) for t in times)
+
+
+def anim(attr, times, values, ease=FADE, discrete=False):
+    """One looping SMIL track; every track shares the same T-second clock."""
+    mode = 'calcMode="discrete"' if discrete else f'calcMode="spline" keySplines="{";".join([ease] * (len(times) - 1))}"'
+    return (f'<animate attributeName="{attr}" dur="{num(T)}s" repeatCount="indefinite" '
+            f'keyTimes="{keytimes(times)}" values="{";".join(str(v) for v in values)}" {mode}/>')
+
+
+def shown(*windows, peak=1, fade=0.28, base=0):
+    """Opacity track visible inside each (start, end) window with soft fades."""
+    times, values = [0.0], [base]
+    for start, end in windows:
+        times += [max(start - fade, times[-1]), start, end, min(end + fade, T)]
+        values += [base, peak, peak, base]
+    times.append(T)
+    values.append(base)
+    return anim('opacity', times, values)
+
+
+def motion(path, start, end, reverse=False):
+    points = '1;1;0;0' if reverse else '0;0;1;1'
+    return (f'<animateMotion dur="{num(T)}s" repeatCount="indefinite" calcMode="spline" keyPoints="{points}" '
+            f'keyTimes="{keytimes([0, start, end, T])}" keySplines="0 0 1 1;{EASE};0 0 1 1">'
+            f'<mpath xlink:href="#{path}"/></animateMotion>')
+
+
+class Svg:
+    def __init__(self, c):
+        self.c, self.defs, self.base, self.fx = c, [], [], []
+
+    def color(self, name):
+        return self.c.get(name, name)
+
+    # primitives
+    def rect(self, layer, x, y, w, h, rx=10, fill='block', stroke='edge', sw=1, extra=''):
+        layer.append(f'<rect x="{num(x)}" y="{num(y)}" width="{num(w)}" height="{num(h)}" rx="{rx}" '
+                     f'fill="{self.color(fill)}" stroke="{self.color(stroke)}" stroke-width="{sw}" {extra}/>')
+
+    def text(self, layer, x, y, value, size=12, fill='body', weight=400, anchor='start', mono=False, extra=''):
+        cls = 'm' if mono else 't'
+        layer.append(f'<text class="{cls}" x="{num(x)}" y="{num(y)}" font-size="{size}" font-weight="{weight}" '
+                     f'fill="{self.color(fill)}" text-anchor="{anchor}" {extra}>{escape(value)}</text>')
+
+    def lane(self, pid, d, arrow=True):
+        self.defs.append(f'<path id="{pid}" d="{d}"/>')
+        marker = ' marker-end="url(#ah-lane)"' if arrow else ''
+        self.base.append(f'<path d="{d}" fill="none" stroke="{self.c["lane"]}" stroke-width="1.5" stroke-linecap="round"{marker}/>')
+
+    def glow_lane(self, pid, color, windows, arrow=True, width=2):
+        marker = f' marker-end="url(#ah-{color})"' if arrow else ''
+        self.fx.append(f'<use xlink:href="#{pid}" fill="none" stroke="{self.c[color]}" stroke-width="{width}" '
+                       f'stroke-linecap="round" opacity="0"{marker}>{shown(*windows)}</use>')
+
+    def glow_block(self, box, color, windows, rx=10):
+        x, y, w, h = box
+        self.fx.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{self.c[color]}" '
+                       f'fill-opacity="{self.c["tint"]}" stroke="{self.c[color]}" stroke-width="1.5" opacity="0">'
+                       f'{shown(*windows)}</rect>')
+
+    def pulse(self, x, y, color, at, radius=17):
+        times = [0, max(at - 0.01, 0.001), at, min(at + 0.7, T - 0.001), T]
+        self.fx.append(f'<circle cx="{x}" cy="{y}" r="5" fill="none" stroke="{self.c[color]}" stroke-width="2" opacity="0">'
+                       f'{anim("r", times, [5, 5, 5, radius, radius], ease="0.2 0.7 0.3 1")}'
+                       f'{anim("opacity", times, [0, 0, 0.55, 0, 0], ease="0.2 0.7 0.3 1")}</circle>')
+
+    def packet(self, pid, start, end, color, reverse=False, chip=None, r=5, arrive=None, trail=True):
+        """A dot with a fading comet tail and an optional moving label."""
+        tail = [(0.12, r * 0.48, 0.16), (0.06, r * 0.72, 0.34)] if trail else []
+        for lag, radius, alpha in tail:
+            self.fx.append(f'<g opacity="0">{motion(pid, start + lag, end + lag, reverse)}'
+                           f'{shown((start + lag, end + lag), peak=alpha, fade=0.14)}'
+                           f'<circle r="{num(radius)}" fill="{self.c[color]}"/></g>')
+        if chip:  # labelled packets ride the lane as a pill instead of a dot
+            width = 14 + 6.6 * len(chip)
+            body = (f'<rect x="{num(-width / 2 - 2)}" y="-10.5" width="{num(width + 4)}" height="21" rx="10.5" fill="{self.c["bg"]}" opacity="0.9"/>'
+                    f'<rect x="{num(-width / 2)}" y="-8.5" width="{num(width)}" height="17" rx="8.5" fill="{self.c[color]}"/>'
+                    f'<text class="t" y="3.8" font-size="10.5" font-weight="700" fill="{self.c["on"]}" text-anchor="middle">{escape(chip)}</text>')
+        else:
+            body = f'<circle r="{r + 2.2}" fill="{self.c["bg"]}" opacity="0.9"/><circle r="{r}" fill="{self.c[color]}"/>'
+        self.fx.append(f'<g opacity="0">{motion(pid, start, end, reverse)}{shown((start, end), fade=0.16)}{body}</g>')
+        if arrive:
+            self.pulse(*arrive, color, end)
+
+
+def block(s, box, title, subtitle, mono=False):
+    x, y, w, h = box
+    s.rect(s.base, x, y, w, h)
+    s.text(s.base, x + 16, y + 24, title, 13, 'text', 700, mono=mono)
+    s.text(s.base, x + 16, y + 42, subtitle, 11.5, 'muted')
+
+
+def panel(s, x, w, title, note):
+    s.rect(s.base, x, PANEL_Y, w, PANEL_H, 14, 'panel', 'border')
+    s.text(s.base, x + 18, PANEL_Y + 23, title, 12, 'text', 700)
+    s.text(s.base, x + w - 18, PANEL_Y + 23, note, 11, 'muted', anchor='end')
+
+
+def build(theme):
+    c = THEMES[theme]
+    s = Svg(c)
+    p1, p2, p3, p4 = [(max(a + 0.1, 0.4), b - (0.4 if b == T else 0.2)) for a, b, *_ in PHASES]
+
+    # arrowheads in neutral and phase colors
+    for name in ('lane', 'violet', 'blue', 'green', 'amber'):
+        s.defs.append(f'<marker id="ah-{name}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" '
+                      f'orient="auto-start-reverse"><path d="M1,1.2 L8.8,5 L1,8.8 z" fill="{c[name]}"/></marker>')
+
+    # canvas + heading
+    s.rect(s.base, 0.5, 0.5, W - 1, H - 1, 16, 'bg', 'edge')
+    s.text(s.base, 40, 46, 'PULSE / OPS · 트래픽 흐름', 11.5, 'violet_ink', 700, extra='letter-spacing="0.6"')
+    s.text(s.base, 40, 77, 'Go 서비스 하나가 화면, 수집, 터미널 요청을 함께 처리합니다', 21, 'text', 700)
+
+    # phase pills with progress bars
+    px = 690
+    for index, (start, end, color, label, _) in enumerate(PHASES):
+        x = px + index * 118
+        s.rect(s.base, x, 34, 108, 30, 15, 'bg', 'edge')
+        s.text(s.base, x + 54, 53.5, label, 12, 'muted', 600, 'middle')
+        win = (start + 0.12, end - 0.12) if index else (0.3, end - 0.12)
+        s.fx.append(f'<g opacity="0">{shown(win, fade=0.25)}'
+                    f'<rect x="{x}" y="34" width="108" height="30" rx="15" fill="{c[color]}" fill-opacity="{c["tint"]}" stroke="{c[color]}" stroke-width="1.5"/>'
+                    f'<text class="t" x="{x + 54}" y="53.5" font-size="12" font-weight="700" fill="{c[color + "_ink"]}" text-anchor="middle">{escape(label)}</text>'
+                    f'<rect x="{x + 16}" y="70" width="0" height="2.5" rx="1.25" fill="{c[color]}">'
+                    f'{anim("width", [0, win[0], win[1], T], [0, 0, 76, 76], ease="0 0 1 1")}</rect></g>')
+
+    # panels and blocks
+    panel(s, *BROWSER, '브라우저', '같은 출처')
+    panel(s, *GO, 'Go 서비스', '단일 프로세스 · 단일 컨테이너')
+    panel(s, *INFRA, '등록한 인프라', '직접 연결')
+    for i, dx in enumerate((0, 11, 22)):
+        s.base.append(f'<circle cx="{BROWSER[0] + 84 + dx}" cy="{PANEL_Y + 19}" r="3" fill="{c["lane"]}"/>')
+
+    block(s, XTERM, 'xterm', '열 때만 로드')
+    block(s, UI, 'UI 스레드', 'Canvas 그래프')
+    block(s, WORKER, 'Worker', '조회 · 이벤트 규칙 평가')
+    block(s, TERM, '터미널 게이트웨이', '단회 티켓 30초 → WebSocket → SSH PTY')
+    block(s, STATIC, '정적 파일', '실행 파일 내장 · gzip · ETag')
+    block(s, API, '/api/monitoring', '3초 공유 캐시', mono=True)
+    block(s, SCHED, '수집 스케줄러', '등록 ID별 1개')
+    s.text(s.base, SCHED[0] + 16, SCHED[1] + 60, '동시 최대 4', 11.5, 'muted')
+    for box, title, sub in ((SERVER, '서버', 'Linux · macOS · Windows'), (DB, '데이터베이스', 'PostgreSQL·MySQL·MariaDB·Oracle'),
+                            (REDIS, 'Redis', 'PING · INFO'), (HTTP, 'HTTP 서비스', '응답 코드 · TLS 만료'),
+                            (APP, '애플리케이션', '/metrics 카운터·히스토그램')):
+        block(s, box, title, sub)
+        s.base.append(f'<circle cx="{box[0] + box[2] - 16}" cy="{box[1] + 19}" r="3.5" fill="{c["lane"]}"/>')
+    s.text(s.base, SERVER[0] + 16, SERVER[1] + 62, 'SSH · jump 최대 8홉 · 호스트 키 고정', 11.5, 'muted')
+
+    # SQLite volume
+    x, y, w, h = SQLITE
+    s.rect(s.base, x, y, w, h)
+    s.base.append(f'<g fill="none" stroke="{c["muted"]}" stroke-width="1.4"><ellipse cx="{x + 32}" cy="{y + 22}" rx="13" ry="4.5"/>'
+                  f'<path d="M{x + 19},{y + 22} v24 a13,4.5 0 0 0 26,0 v-24"/><path d="M{x + 19},{y + 34} a13,4.5 0 0 0 26,0"/></g>')
+    s.text(s.base, x + 58, y + 24, 'SQLite 볼륨', 13, 'text', 700)
+    s.text(s.base, x + 58, y + 42, '등록 정보 AES-256-GCM 암호화', 11.5, 'muted')
+    s.text(s.base, x + 58, y + 58, '관측 15일 · 감사 90일 보존', 11.5, 'muted')
+
+    # UI mini chart, xterm screen, static file icons, scheduler slots
+    for gy in (258, 281, 304):
+        s.base.append(f'<line x1="176" y1="{gy}" x2="268" y2="{gy}" stroke="{c["border"]}" stroke-width="1"/>')
+    chart = [(178, 298), (186, 292), (194, 295), (202, 284), (210, 288), (218, 276), (226, 280), (234, 268), (242, 273), (250, 262), (258, 266), (266, 259)]
+    s.rect(s.base, 168, 163, 104, 44, 6, 'screen', 'screen')
+    s.text(s.base, 177, 181, '$', 11, 'green', 700, mono=True)
+    for i, fx in enumerate((714, 732, 750)):
+        s.base.append(f'<path d="M{fx},{262} h8 l4,4 v11 h-12 z" fill="none" stroke="{c["lane"]}" stroke-width="1.3" stroke-linejoin="round"/>')
+    for sy in SLOT_YS:
+        s.rect(s.base, SLOT_X, sy, 18, 18, 4, 'block', 'lane', 1.3)
+    s.text(s.base, SLOT_X + 9, SLOT_YS[0] - 6, '슬롯', 10.5, 'faint', 600, 'middle')
+    clock = (SCHED[0] + 26, SCHED[1] + 112)
+    s.base.append(f'<circle cx="{clock[0]}" cy="{clock[1]}" r="10" fill="none" stroke="{c["muted"]}" stroke-width="1.4"/>')
+    s.text(s.base, clock[0] + 18, clock[1] + 4, '15초 주기', 11.5, 'body', 600)
+
+    # lanes ------------------------------------------------------------------
+    l0, l1 = LEFT_GAP
+    r0, r1 = RIGHT_GAP
+    for name, yy in (('term', 174), ('static', 264), ('api', 389)):
+        s.lane(f'{name}-req', f'M{l0 + 2},{yy} H{l1 - 2}')
+        s.lane(f'{name}-res', f'M{l1 - 2},{yy + 22} H{l0 + 2}')
+    s.lane('pty-req', f'M{r0 + 2},174 H{r1 - 2}')
+    s.lane('pty-res', f'M{r1 - 2},196 H{r0 + 2}')
+    s.lane('post-req', 'M112,332 V353')
+    s.lane('post-res', 'M128,353 V332')
+    s.lane('db-read', 'M530,502 V570')
+    s.lane('db-rows', 'M552,570 V502')
+    s.lane('commit', 'M699,502 V570')
+    s.defs.append(f'<path id="queue-in" d="M{QUEUE[0]},{QUEUE[1]} V{SLOT_YS[3] + 9}"/>')
+    targets = {'server': SERVER[1] + 67, 'db': DB[1] + 26, 'redis': REDIS[1] + 26, 'http': HTTP[1] + 26, 'app': APP[1] + 26}
+    for slot, name in ((0, 'server'), (1, 'db'), (2, 'redis'), (3, 'http'), (3, 'app')):
+        sy, ty = SLOT_YS[slot] + 9, targets[name]
+        s.lane(f'fan-{name}', f'M{SLOT_X + 18},{sy} H{r0} C{r0 + 74},{sy} {r1 - 74},{ty} {r1},{ty}', arrow=False)
+
+    labels = [((l0 + l1) / 2, 162, 'POST /terminals → WS', True), ((l0 + l1) / 2, 216, '단회 티켓 · 터미널 출력', False),
+              ((l0 + l1) / 2, 252, 'GET / · /assets/*', True), ((l0 + l1) / 2, 306, 'gzip · ETag 응답', False),
+              ((l0 + l1) / 2, 377, 'GET /api/monitoring', True), ((l0 + l1) / 2, 431, 'JSON 스냅샷', False),
+              ((r0 + r1) / 2, 162, 'SSH PTY', True), ((r0 + r1) / 2, 216, '입력 · 출력', False)]
+    for lx, ly, value, mono in labels:
+        s.text(s.base, lx, ly, value, 10.5, 'muted', 500, 'middle', mono=mono)
+    s.text(s.base, 138, 347, 'postMessage', 10.5, 'muted', 500, mono=True)
+    s.text(s.base, 522, 541, '관측값 읽기', 10.5, 'muted', 500, 'end')
+    s.text(s.base, 709, 541, '결과 저장', 10.5, 'muted', 500)
+    s.text(s.base, WORKER[0], WORKER[1] + 116, '화면이 숨겨지면 조회를 멈춥니다.', 11, 'faint')
+
+    # ① page load --------------------------------------------------------------
+    s.glow_block(UI, 'violet', [p1])
+    s.glow_block(STATIC, 'violet', [p1])
+    s.glow_lane('static-req', 'violet', [(0.35, 1.55)])
+    s.glow_lane('static-res', 'violet', [(1.5, 3.4)])
+    s.packet('static-req', 0.5, 1.4, 'violet', arrive=(l1, 264))
+    for i, (name, start) in enumerate((('HTML', 1.6), ('CSS', 1.88), ('JS', 2.16))):
+        s.packet('static-res', start, start + 1.0, 'violet', chip=name, arrive=(l0, 286) if i == 2 else None)
+        fx = 714 + i * 18
+        s.fx.append(f'<path d="M{fx},{262} h8 l4,4 v11 h-12 z" fill="{c["violet"]}" fill-opacity="0.18" stroke="{c["violet"]}" '
+                    f'stroke-width="1.3" stroke-linejoin="round" opacity="0">{shown((start - 0.05, p1[1]))}</path>')
+    s.fx.append(f'<g opacity="0">{shown((3.3, T - 0.45), fade=0.4)}'
+                + ''.join(f'<line x1="176" y1="{gy}" x2="268" y2="{gy}" stroke="{c["lane"]}" stroke-width="1"/>' for gy in (258, 281, 304))
+                + '</g>')
+
+    # ② refresh ----------------------------------------------------------------
+    for box in (UI, WORKER, API, SQLITE):
+        s.glow_block(box, 'blue', [p2])
+    s.glow_lane('post-req', 'blue', [(4.6, 5.3)])
+    s.glow_lane('api-req', 'blue', [(5.05, 6.3), (9.5, 10.75)])
+    s.glow_lane('db-read', 'blue', [(6.1, 6.9)])
+    s.glow_lane('db-rows', 'blue', [(6.75, 7.55)])
+    s.glow_lane('api-res', 'blue', [(7.4, 8.65), (10.5, 11.5)])
+    s.glow_lane('post-res', 'blue', [(8.65, 9.3)])
+    s.packet('post-req', 4.7, 5.05, 'blue', trail=False, arrive=(112, 355))
+    s.packet('api-req', 5.15, 6.05, 'blue', arrive=(l1, 389))
+    s.packet('db-read', 6.2, 6.7, 'blue', arrive=(530, 572))
+    s.packet('db-rows', 6.85, 7.35, 'blue', arrive=(552, 500))
+    s.packet('api-res', 7.5, 8.4, 'blue', chip='JSON', arrive=(l0, 411))
+    s.packet('post-res', 8.75, 9.1, 'blue', trail=False, arrive=(128, 330))
+    s.packet('api-req', 9.6, 10.5, 'blue', arrive=(l1, 389))
+    s.packet('api-res', 10.6, 11.5, 'blue', chip='캐시')
+    chip_x, chip_y = API[0] + 16, API[1] + 96
+    s.rect(s.base, chip_x, chip_y, 110, 24, 12, 'panel', 'edge')
+    s.text(s.base, chip_x + 55, chip_y + 16, '캐시 상태', 11, 'faint', 600, 'middle')
+    for (start, end), color, label in (((6.05, 7.6), 'amber', '만료 → SQLite'), ((10.5, 11.45), 'green', '캐시 적중')):
+        s.fx.append(f'<g opacity="0">{shown((start, end), fade=0.2)}<rect x="{chip_x}" y="{chip_y}" width="110" height="24" rx="12" '
+                    f'fill="{c["bg"]}" stroke="{c[color]}" stroke-width="1.5"/><text class="t" x="{chip_x + 55}" y="{chip_y + 16}" '
+                    f'font-size="11" font-weight="700" fill="{c[color + "_ink"]}" text-anchor="middle">{escape(label)}</text></g>')
+    s.fx.append(f'<g opacity="0">{shown((8.4, 9.5), fade=0.2)}<rect x="{WORKER[0] + 16}" y="{WORKER[1] + 56}" width="78" height="22" rx="11" '
+                f'fill="{c["blue"]}" fill-opacity="{c["tint"]}" stroke="{c["blue"]}" stroke-width="1.2"/><text class="t" x="{WORKER[0] + 55}" '
+                f'y="{WORKER[1] + 71}" font-size="11" font-weight="700" fill="{c["blue_ink"]}" text-anchor="middle">규칙 평가</text></g>')
+    line = 'M' + ' L'.join(f'{px},{py}' for px, py in chart)
+    s.fx.append(f'<path d="{line}" fill="none" stroke="{c["blue"]}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" '
+                f'pathLength="1" stroke-dasharray="1 1" stroke-dashoffset="1" opacity="0">'
+                f'{anim("stroke-dashoffset", [0, 9.1, 9.95, T], [1, 1, 0, 0], ease=EASE)}{shown((9.1, T - 0.45), fade=0.35)}</path>')
+    s.pulse(266, 259, 'blue', 11.5, 12)
+
+    # ③ collection -------------------------------------------------------------
+    s.glow_block(SCHED, 'green', [p3])
+    s.glow_block(SQLITE, 'green', [(14.75, p3[1])])
+    s.fx.append(f'<g opacity="0">{shown(p3)}<circle cx="{clock[0]}" cy="{clock[1]}" r="10" fill="{c["green"]}" fill-opacity="{c["tint"]}" '
+                f'stroke="{c["green"]}" stroke-width="1.5"/></g>')
+    s.fx.append(f'<line x1="{clock[0]}" y1="{clock[1]}" x2="{clock[0]}" y2="{clock[1] - 6.5}" stroke="{c["green"]}" stroke-width="1.6" '
+                f'stroke-linecap="round"><animateTransform attributeName="transform" type="rotate" dur="{num(T)}s" repeatCount="indefinite" '
+                f'calcMode="spline" keyTimes="{keytimes([0, 11.75, 12.45, T])}" keySplines="0 0 1 1;{EASE};0 0 1 1" '
+                f'values="0 {clock[0]} {clock[1]};0 {clock[0]} {clock[1]};360 {clock[0]} {clock[1]};360 {clock[0]} {clock[1]}"/></line>')
+    s.base.append(f'<path d="M{clock[0]},{clock[1] - 6} V{clock[1]} H{clock[0] + 5}" fill="none" stroke="{c["muted"]}" stroke-width="1.4" '
+                  f'stroke-linecap="round" stroke-linejoin="round"/>')
+    s.pulse(*clock, 'green', 11.8, 22)
+    jobs = [  # name, slot, out start, back start, box
+        ('server', 0, 12.0, 14.2, SERVER), ('db', 1, 12.08, 13.85, DB), ('redis', 2, 12.16, 13.6, REDIS), ('http', 3, 12.24, 13.35, HTTP),
+        ('app', 3, 14.65, 15.85, APP)]
+    for name, slot, out, back, box in jobs:
+        sy = SLOT_YS[slot]
+        s.fx.append(f'<rect x="{SLOT_X}" y="{sy}" width="18" height="18" rx="4" fill="{c["green"]}" opacity="0">'
+                    f'{shown((out - 0.05, back + 0.9), fade=0.18)}</rect>')
+        s.glow_lane(f'fan-{name}', 'green', [(out - 0.1, back + 0.95)], arrow=False)
+        s.glow_block(box, 'green', [(out + 0.9, back + 0.2)])
+        s.packet(f'fan-{name}', out, out + 1.0, 'green', arrive=(r1, box[1] + (67 if name == 'server' else 26)))
+        s.packet(f'fan-{name}', back, back + 0.9, 'green', reverse=True)
+        s.fx.append(f'<circle cx="{box[0] + box[2] - 16}" cy="{box[1] + 19}" r="3.5" fill="{c["green"]}" opacity="0">'
+                    f'{shown((back + 0.9, p3[1]), fade=0.2)}</circle>')
+        s.packet('commit', back + 0.95, back + 1.5, 'green', trail=False, r=4, arrive=(699, 572))
+    s.glow_lane('commit', 'green', [(14.2, 17.3)])
+    s.fx.append(f'<g opacity="0">{shown((12.0, 14.3), fade=0.18)}<circle cx="{QUEUE[0]}" cy="{QUEUE[1]}" r="5" fill="{c["green"]}"/>'
+                f'</g>')
+    s.fx.append(f'<g opacity="0">{shown((12.0, 14.25), fade=0.18)}<text class="t" x="{QUEUE[0] - 12}" y="{QUEUE[1] + 4}" font-size="11" '
+                f'font-weight="700" fill="{c["green_ink"]}" text-anchor="end">대기 1</text></g>')
+    s.packet('queue-in', 14.3, 14.6, 'green', trail=False)
+    s.fx.append(f'<g opacity="0">{shown((14.85, p3[1]), fade=0.2)}<rect x="{SQLITE[0] + 210}" y="{SQLITE[1] + 10}" width="78" height="20" rx="10" '
+                f'fill="{c["green"]}" fill-opacity="{c["tint"]}" stroke="{c["green"]}" stroke-width="1.2"/><text class="t" x="{SQLITE[0] + 249}" '
+                f'y="{SQLITE[1] + 24}" font-size="10.5" font-weight="700" fill="{c["green_ink"]}" text-anchor="middle">관측 저장</text></g>')
+    s.fx.append(f'<g opacity="0">{shown((6.8, 7.6), fade=0.2)}<rect x="{SQLITE[0] + 210}" y="{SQLITE[1] + 10}" width="78" height="20" rx="10" '
+                f'fill="{c["blue"]}" fill-opacity="{c["tint"]}" stroke="{c["blue"]}" stroke-width="1.2"/><text class="t" x="{SQLITE[0] + 249}" '
+                f'y="{SQLITE[1] + 24}" font-size="10.5" font-weight="700" fill="{c["blue_ink"]}" text-anchor="middle">스냅샷 조회</text></g>')
+
+    # ④ terminal ---------------------------------------------------------------
+    for box in (XTERM, TERM):
+        s.glow_block(box, 'amber', [p4])
+    s.glow_block(SERVER, 'amber', [(21.9, p4[1])])
+    s.glow_lane('term-req', 'amber', [(18.85, 20.0), (20.9, p4[1])])
+    s.glow_lane('term-res', 'amber', [(19.85, 21.0), (24.95, 25.7)])
+    s.glow_lane('pty-req', 'amber', [(21.85, p4[1])])
+    s.glow_lane('pty-res', 'amber', [(24.5, 25.2)])
+    s.packet('term-req', 18.95, 19.85, 'amber', arrive=(l1, 174))
+    s.packet('term-res', 19.95, 20.85, 'amber', chip='티켓 30초', arrive=(l0, 196))
+    s.packet('term-req', 21.0, 21.85, 'amber', chip='WS', arrive=(l1, 174))
+    s.packet('pty-req', 21.95, 22.7, 'amber', arrive=(r1, 174))
+    s.packet('term-req', 23.55, 24.0, 'amber', r=3.5, trail=False)
+    s.packet('pty-req', 24.05, 24.42, 'amber', r=3.5, trail=False, arrive=(r1, 174))
+    s.packet('pty-res', 24.6, 24.97, 'amber', r=3.5, trail=False)
+    s.packet('term-res', 25.02, 25.47, 'amber', r=3.5, trail=False, arrive=(l0, 196))
+    s.fx.append(f'<g opacity="0">{shown((22.0, p4[1]), fade=0.2)}<text class="t" x="{(l0 + l1) / 2}" y="148" font-size="10.5" font-weight="700" '
+                f'fill="{c["amber_ink"]}" text-anchor="middle">연결 유지</text></g>')
+    for i, ch in enumerate('df -h'):
+        s.fx.append(f'<text class="m" x="{188 + i * 7}" y="181" font-size="11" fill="{c["screen_text"]}" opacity="0">'
+                    f'{escape(ch)}{shown((22.9 + i * 0.12, p4[1]), fade=0.02)}</text>')
+    cursor_x = [188 + i * 7 for i in range(6)]
+    s.fx.append(f'<rect x="188" y="172" width="6" height="11" fill="{c["amber"]}" opacity="0">'
+                f'{anim("x", [0, 22.9, 23.02, 23.14, 23.26, 23.38, T], [cursor_x[0], cursor_x[1], cursor_x[2], cursor_x[3], cursor_x[4], cursor_x[5], cursor_x[5]], discrete=True)}'
+                f'{shown((22.75, 23.5), fade=0.05)}</rect>')
+    for i, width in enumerate((68, 44)):
+        s.fx.append(f'<rect x="177" y="{189 + i * 8}" width="{width}" height="4" rx="2" fill="{c["faint"]}" opacity="0">'
+                    f'{shown((25.5 + i * 0.12, p4[1]), fade=0.18)}</rect>')
+    s.fx.append(f'<g opacity="0">{shown((22.75, p4[1]), fade=0.2)}<rect x="{SQLITE[0] + 202}" y="{SQLITE[1] + 10}" width="86" height="20" rx="10" '
+                f'fill="{c["amber"]}" fill-opacity="{c["tint"]}" stroke="{c["amber"]}" stroke-width="1.2"/><text class="t" x="{SQLITE[0] + 245}" '
+                f'y="{SQLITE[1] + 24}" font-size="10.5" font-weight="700" fill="{c["amber_ink"]}" text-anchor="middle">감사: 연결만</text></g>')
+    s.glow_block(SQLITE, 'amber', [(22.75, p4[1])])
+
+    # timing strip and connection rules ---------------------------------------------
+    s.text(s.base, 40, 578, '두 주기는 서로 독립적입니다', 12, 'text', 700)
+    s.text(s.base, 40, 607, '화면 조회 · 예 3초', 11, 'muted')
+    s.text(s.base, 40, 637, '실제 수집 · 15초', 11, 'muted')
+    for yy in (603, 633):
+        s.base.append(f'<line x1="150" y1="{yy}" x2="414" y2="{yy}" stroke="{c["border"]}" stroke-width="1.5"/>')
+    for i, xx in enumerate(range(150, 415, 20)):
+        s.base.append(f'<circle cx="{xx}" cy="603" r="3" fill="{c["lane"]}"/>')
+    for xx in (150, 250, 350):
+        s.base.append(f'<rect x="{xx - 2.5}" y="625" width="5" height="16" rx="2.5" fill="{c["lane"]}"/>')
+    for xx, at in ((230, 5.15), (250, 9.6)):
+        s.fx.append(f'<circle cx="{xx}" cy="603" r="4" fill="{c["blue"]}" opacity="0">{shown((at, p2[1]), fade=0.2)}</circle>')
+        s.pulse(xx, 603, 'blue', at, 12)
+    s.fx.append(f'<rect x="247.5" y="625" width="5" height="16" rx="2.5" fill="{c["green"]}" opacity="0">{shown((11.8, p3[1]), fade=0.2)}</rect>')
+    s.pulse(250, 633, 'green', 11.8, 14)
+    s.text(s.base, 820, 578, '직접 연결 원칙', 12, 'text', 700)
+    for i, value in enumerate(('저장한 비밀값은 응답에 포함하지 않음', 'DB는 읽기 전용 모니터링 경로만 조회', '저장과 실제 연결은 별도 동작')):
+        yy = 604 + i * 20
+        s.base.append(f'<path d="M821,{yy - 4} l3.5,3.5 l6.5,-7" fill="none" stroke="{c["green"]}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>')
+        s.text(s.base, 838, yy, value, 11.5, 'body')
+
+    # caption bar ---------------------------------------------------------------
+    s.rect(s.base, 40, 664, 1120, 50, 12, 'panel', 'border')
+    s.text(s.base, 1144, 694, '논리 경로 · 실제 속도 아님', 10.5, 'faint', 500, 'end')
+    s.base.append(f'<text class="t rm" x="60" y="694" font-size="13" fill="{c["body"]}">① 화면 로드 → ② 화면 갱신(3초 캐시) → ③ 15초 직접 수집 → ④ 단회 티켓 터미널</text>')
+    for start, end, color, label, caption in PHASES:
+        win = (start + 0.15, end - 0.3) if start else (0.3, end - 0.3)
+        s.fx.append(f'<g opacity="0">{shown(win, fade=0.25)}<circle cx="64" cy="689" r="5" fill="{c[color]}"/>'
+                    f'<text class="t" x="78" y="694" font-size="13" fill="{c["body"]}"><tspan font-weight="700" fill="{c[color + "_ink"]}">'
+                    f'{escape(label)}</tspan>  {escape(caption)}</text></g>')
+
+    title = 'Pulse Ops 트래픽 흐름'
+    desc = ('브라우저는 Go 서비스에서 정적 파일과 /api/monitoring 스냅샷을 받고, Go 스케줄러는 15초마다 최대 4개 슬롯으로 등록한 '
+            '서버·DB·Redis·HTTP·애플리케이션을 직접 수집해 SQLite에 저장하며, 터미널은 단회 티켓과 WebSocket을 거쳐 SSH PTY로 연결됩니다.')
+    style = ('.t{font-family:Pretendard,"Pretendard Variable","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",'
+             '"Segoe UI",system-ui,sans-serif}.m{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace}'
+             'text{text-rendering:geometricPrecision}.rm{display:none}'
+             '@media (prefers-reduced-motion:reduce){.fx{display:none}.rm{display:inline}}')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 {W} {H}" width="{W}" height="{H}" '
+            f'role="img" aria-labelledby="title desc"><title id="title">{escape(title)}</title><desc id="desc">{escape(desc)}</desc>'
+            f'<style>{style}</style><defs>{"".join(s.defs)}</defs>{"".join(s.base)}<g class="fx">{"".join(s.fx)}</g></svg>\n')
+
+
+if __name__ == '__main__':
+    OUT.mkdir(parents=True, exist_ok=True)
+    for theme, name in (('light', 'architecture-flow.svg'), ('dark', 'architecture-flow-dark.svg')):
+        (OUT / name).write_text(build(theme), encoding='utf-8')
+    print(f'Wrote {OUT / "architecture-flow.svg"} and {OUT / "architecture-flow-dark.svg"} ({num(T)}s loop).')
