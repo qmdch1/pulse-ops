@@ -5,7 +5,7 @@ export type InfrastructureKind='application'|'database'|'cache'|'frontend'|'prob
 export const infrastructureLabels:Record<InfrastructureKind,string>={application:'애플리케이션',database:'데이터베이스',cache:'캐시',frontend:'프런트 서버',probe:'가용성 검사',host:'호스트',monitoring:'모니터링',other:'기타 인프라'};
 export function infrastructureKind(target:Target):InfrastructureKind {
  const job=target.job.toLowerCase();
- if(/postgres|mysql|mssql|mongodb|database/.test(job))return 'database';
+ if(/postgres|mysql|mariadb|oracle|mssql|mongodb|database/.test(job))return 'database';
  if(/redis|memcached|cache/.test(job))return 'cache';
  if(/nginx|frontend|gateway/.test(job))return 'frontend';
  if(/blackbox|probe/.test(job))return 'probe';

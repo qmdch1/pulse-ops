@@ -16,30 +16,31 @@ type SSHConfig struct {
 	Fingerprint string `json:"fingerprint"`
 }
 type Asset struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Kind           string    `json:"kind"`
-	Address        string    `json:"address"`
-	Port           int       `json:"port"`
-	Username       string    `json:"username"`
-	Database       string    `json:"database"`
-	TLSMode        string    `json:"tlsMode"`
-	OS             string    `json:"os"`
-	MetricsURL     string    `json:"metricsUrl"`
-	Environment    string    `json:"environment"`
-	SSH            SSHConfig `json:"ssh"`
-	Dependencies   []string  `json:"dependencies"`
-	Enabled        bool      `json:"enabled"`
-	Version        int       `json:"version"`
-	CreatedAt      string    `json:"createdAt"`
-	UpdatedAt      string    `json:"updatedAt"`
-	HasPassword    bool      `json:"hasPassword"`
-	HasSSHPassword bool      `json:"hasSshPassword"`
-	HasPrivateKey  bool      `json:"hasPrivateKey"`
-	HasPassphrase  bool      `json:"hasPassphrase"`
-	Status         string    `json:"status"`
-	LastSeen       string    `json:"lastSeen"`
-	Message        string    `json:"message"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	Kind              string    `json:"kind"`
+	Address           string    `json:"address"`
+	Port              int       `json:"port"`
+	Username          string    `json:"username"`
+	Database          string    `json:"database"`
+	OracleConnectMode string    `json:"oracleConnectMode"`
+	TLSMode           string    `json:"tlsMode"`
+	OS                string    `json:"os"`
+	MetricsURL        string    `json:"metricsUrl"`
+	Environment       string    `json:"environment"`
+	SSH               SSHConfig `json:"ssh"`
+	Dependencies      []string  `json:"dependencies"`
+	Enabled           bool      `json:"enabled"`
+	Version           int       `json:"version"`
+	CreatedAt         string    `json:"createdAt"`
+	UpdatedAt         string    `json:"updatedAt"`
+	HasPassword       bool      `json:"hasPassword"`
+	HasSSHPassword    bool      `json:"hasSshPassword"`
+	HasPrivateKey     bool      `json:"hasPrivateKey"`
+	HasPassphrase     bool      `json:"hasPassphrase"`
+	Status            string    `json:"status"`
+	LastSeen          string    `json:"lastSeen"`
+	Message           string    `json:"message"`
 }
 type Secrets struct {
 	Password    string `json:"password"`
@@ -101,7 +102,7 @@ func validHost(host string) bool {
 	return true
 }
 func validateAsset(a Asset, all map[string]StoredAsset) error {
-	if a.Kind != "server" && a.Kind != "application" && a.Kind != "postgres" && a.Kind != "redis" && a.Kind != "http" {
+	if a.Kind != "server" && a.Kind != "application" && !isSQLDatabase(a.Kind) && a.Kind != "redis" && a.Kind != "http" {
 		return errors.New("지원하는 인프라 종류를 선택하세요")
 	}
 	if len(a.Name) > 160 || len(a.Username) > 128 || len(a.SSH.Username) > 128 || len(a.Database) > 128 || len(a.Environment) > 40 || strings.ContainsAny(a.Name+a.Username+a.Database+a.SSH.Username, "\x00\r\n") {
@@ -130,6 +131,12 @@ func validateAsset(a Asset, all map[string]StoredAsset) error {
 	if a.TLSMode != "" && a.TLSMode != "disable" && a.TLSMode != "verify-full" {
 		return errors.New("TLS 설정을 확인하세요")
 	}
+	if a.OracleConnectMode != "" && a.OracleConnectMode != "service" && a.OracleConnectMode != "sid" {
+		return errors.New("Oracle 연결 방식은 Service name 또는 SID를 선택하세요")
+	}
+	if a.Kind == "oracle" && a.Database != "" && !validOracleName(a.Database) {
+		return errors.New("Oracle Service name / SID에는 영문·숫자·점·밑줄·하이픈만 입력하세요")
+	}
 	if a.OS != "" && a.OS != "linux" && a.OS != "macos" && a.OS != "windows" {
 		return errors.New("운영체제를 확인하세요")
 	}
@@ -155,6 +162,17 @@ func validateAsset(a Asset, all map[string]StoredAsset) error {
 		jump = next.Asset.SSH.JumpID
 	}
 	return nil
+}
+func isSQLDatabase(kind string) bool {
+	return kind == "postgres" || kind == "mysql" || kind == "mariadb" || kind == "oracle"
+}
+func validOracleName(name string) bool {
+	for _, c := range name {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 func checkedURL(raw string) (*url.URL, error) {
 	u, e := url.Parse(raw)

@@ -1,0 +1,52 @@
+# Optional database engine test stack. Never include this file in production.
+services:
+  mysql:
+    image: mysql:8.4@sha256:6ea90827b1100f8f2ae306a539f86d2c264a26ed435a2a9f75551dd5c3aeb242
+    environment: {MYSQL_ROOT_PASSWORD: pulse_isolated_root_only}
+    volumes:
+      - test-mysql:/var/lib/mysql
+      - ./monitoring/test-databases/mysql.sql:/docker-entrypoint-initdb.d/10-monitor.sql:ro
+    healthcheck:
+      test: [CMD, mysqladmin, ping, -h, localhost, -ppulse_isolated_root_only]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    mem_limit: 512m
+  mariadb:
+    image: mariadb:11.4@sha256:1292844148b311e4ed4300022a996d39083f415a963e970cf47cad1b3b18e3a6
+    environment: {MARIADB_ROOT_PASSWORD: pulse_isolated_root_only}
+    volumes:
+      - test-mariadb:/var/lib/mysql
+      - ./monitoring/test-databases/mysql.sql:/docker-entrypoint-initdb.d/10-monitor.sql:ro
+    healthcheck:
+      test: [CMD, healthcheck.sh, --connect, --innodb_initialized]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    mem_limit: 384m
+  oracle:
+    image: ghcr.io/gvenzl/oracle-free:23.26.3-slim@sha256:6d61d267a3b978c24c5ac1790e62e927416a0aec446bd86e4b3a1527562757bd
+    environment: {ORACLE_PASSWORD: Pulse_isolated_root_2026}
+    volumes:
+      - test-oracle:/opt/oracle/oradata
+      - ./monitoring/test-databases/oracle.sql:/container-entrypoint-initdb.d/10-monitor.sql:ro
+      - ./monitoring/test-databases/oracle-limited.sql:/container-entrypoint-initdb.d/20-limited.sql:ro
+    healthcheck:
+      test: [CMD, healthcheck.sh]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 30
+    mem_limit: 2304m
+    shm_size: 1g
+  control-plane:
+    environment:
+      CONTROL_TEST_DATABASES: 'true'
+    depends_on:
+      mysql: {condition: service_healthy}
+      mariadb: {condition: service_healthy}
+      oracle: {condition: service_healthy}
+volumes:
+  test-mysql:
+  test-mariadb:
+  test-oracle:

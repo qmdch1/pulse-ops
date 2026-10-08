@@ -20,6 +20,12 @@ docker compose -f compose.test.yml --profile dashboard up -d --build
 
 기본 등록 대상은 API 서버 3대, PostgreSQL, Redis, HTTP 프런트, SSH bastion, SSH node입니다. SSH bastion은 테스트 비밀번호, node는 생성된 키와 bastion 경유 연결을 사용합니다. SSH 포트와 DB 포트는 호스트에 공개하지 않습니다. 테스트 자격 증명과 키를 실제 서버에 사용하지 마세요.
 
+MySQL·MariaDB·Oracle까지 함께 연결하려면 아래 확장 테스트 환경을 사용합니다. 추가 DB 3개도 목록에 자동 등록됩니다. [DB별 연결·권한·지표 범위](docs/database-engines.md)를 확인하세요.
+
+```sh
+docker compose -f compose.test.yml -f compose.test.databases.yml --profile dashboard up -d --build
+```
+
 호스트/DB/캐시는 약 15초마다 수집합니다. 애플리케이션 요청 변화율·P50/P95/P97/P99/P99.9는 연속 5분 표본이 쌓인 후 계산합니다. 한 시간 SLO 소진율은 한 시간 표본이 필요합니다. 재시작·수집 공백·카운터 리셋 후에는 표본이 다시 확보될 때까지 미관측입니다.
 
 API 수 변경:
@@ -38,9 +44,10 @@ docker compose -f compose.test.yml --profile dashboard restart control-plane
 - Go 1.27: 등록 저장소, AES-256-GCM 인증 정보 암호화, SSH 및 최대 8홉 점프, 고정 호스트 키 검증, PTY/WebSocket 터미널, 수집 스케줄, 관측/감사 저장.
 - Linux `/proc`·`df`, macOS `top`·`vm_stat`, Windows SSH의 PowerShell CIM 리소스 조회. 관리자 설치나 원격 임의 스크립트 배포 없이 고정 조회 명령만 사용합니다.
 - PostgreSQL: 읽기 전용 세션, `SELECT 1` 왕복, 현재 DB의 통계·잠금·복제 상태. 원본 업무 테이블을 조회하지 않습니다.
+- MySQL·MariaDB: 서버 전체 연결·InnoDB·명령 통계. Oracle: Service name/SID, 사용자 세션·차단·시스템 통계. 세 엔진 모두 SSH 경유와 읽기 왕복 측정을 지원하며 통계 권한 부족을 연결 실패와 구분합니다.
 - Redis: PING·INFO. HTTP: 등록 URL 응답과 TLS 만료. 애플리케이션: 등록된 `/metrics` 텍스트의 카운터·히스토그램을 직접 계산합니다.
 - SQLite: 일반 인덱스만 사용, 관측 15일/감사 90일 보존. 차트는 최대 24시간 조회하며 규칙 평가는 화면 기간과 별도로 최근 1시간의 15초 표본을 사용합니다.
-- 106개 지표 정의와 53개 규칙을 유지합니다. 현재 수집 경로에서 제공되지 않는 Kubernetes/JVM/API 라벨별/장기 기준선 등은 미관측입니다. 주소만으로 앱 내부 P99·GC·세션 만료를 추측하지 않습니다.
+- 119개 지표 정의와 58개 규칙을 유지합니다. 현재 수집 경로에서 제공되지 않는 Kubernetes/JVM/API 라벨별/장기 기준선 등은 미관측입니다. 주소만으로 앱 내부 P99·GC·세션 만료를 추측하지 않습니다.
 - Prometheus/Grafana는 별도 분석용 테스트 도구입니다. 이들의 수집 대상 목록으로 인프라 등록을 대체하지 않습니다. 기존 Prometheus 설정과 지표 계약은 선택적 통합 참고 자료로 유지합니다.
 
 같은 등록 ID 안에서만 이벤트 조건을 평가합니다. 사용자가 지정한 DB·캐시·서버 의존 관계는 관련 그래프를 추가하며, 그 값을 다른 서버의 조건 값으로 대신 사용하지 않습니다. 연결/수집/터미널 감사 이력은 영구 저장되지만 화면 상관·예측 이벤트의 발생/해제 이력은 아직 영구 사고 저장소에 기록하지 않습니다.

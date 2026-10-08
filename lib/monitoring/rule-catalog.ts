@@ -1,5 +1,6 @@
 import {metricById} from './catalog.ts';
 import {simpleRules} from './rules.ts';
+import {databaseEvidence} from './database-evidence.ts';
 import type {Incident,Snapshot} from './types';
 
 export type RuleDefinition={id:string;title:string;metricIds:string[];condition:string;duration:string;severity:Incident['severity'];kind:Incident['kind'];requiredIds:string[]};
@@ -30,7 +31,7 @@ export const eventRules:RuleDefinition[]=[
  rule('post-deploy','배포 후 지연 회복 지연',['deployment','p99','canary'],'배포 후 30분 미만 AND P99 > 500ms','P99 10분 지속','warning','detected',['deployment','p99']),
  ...simpleRules.map(([id,title,,severity,kind])=>{
   const metric=metricById.get(id)!;
-  return rule(id,title,[id],`${metric.title} ${metric.direction==='below'?'<':'>'} ${metric.warning} ${metric.unit}`,kind==='expiring'?'30초 지속':'1분 지속',severity,kind);
+  return rule(id,title,databaseEvidence[id]||[id],`${metric.title} ${metric.direction==='below'?'<':'>'} ${metric.warning} ${metric.unit}`,kind==='expiring'?'30초 지속':'1분 지속',severity,kind,[id]);
  }),
 ];
 export const ruleById=new Map(eventRules.map(rule=>[rule.id,rule]));

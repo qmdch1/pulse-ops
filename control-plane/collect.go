@@ -52,6 +52,10 @@ func (s *Service) collect(ctx context.Context, id string) error {
 		values, raw, e = s.collectSSH(ctx, record)
 	case "postgres":
 		values, raw, e = s.collectPostgres(ctx, record)
+	case "mysql", "mariadb":
+		values, raw, e = s.collectMySQL(ctx, record)
+	case "oracle":
+		values, raw, e = s.collectOracle(ctx, record)
 	case "redis":
 		values, raw, e = s.collectRedis(ctx, record)
 	case "http":
@@ -73,7 +77,7 @@ func (s *Service) collect(ctx context.Context, id string) error {
 		values["targets"] = 0
 		values["targets-down"] = 1
 		switch record.Asset.Kind {
-		case "postgres":
+		case "postgres", "mysql", "mariadb", "oracle":
 			values["db-up"] = 0
 		case "redis":
 			values["redis-up"] = 0
@@ -84,6 +88,9 @@ func (s *Service) collect(ctx context.Context, id string) error {
 	if e == nil {
 		values["targets"] = 1
 		values["targets-down"] = 0
+		if ready, ok := values["db-monitoring-ready"]; ok && ready == 0 {
+			message = "접속 정상 · 일부 DB 통계 미수집. 모니터링 읽기 권한·DB 버전·쿼리 제한을 확인하세요"
+		}
 	}
 	for key, value := range values {
 		if math.IsNaN(value) || math.IsInf(value, 0) {

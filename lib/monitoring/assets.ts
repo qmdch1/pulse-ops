@@ -1,9 +1,18 @@
 import type {Snapshot,MetricResult,Incident} from './types';
 import {detectIncidents} from './rules.ts';
-export type AssetKind='server'|'application'|'postgres'|'redis'|'http';
-export type Asset={id:string;name:string;kind:AssetKind;address:string;port:number;username:string;database:string;tlsMode:string;os:string;metricsUrl:string;environment:string;ssh:{host:string;port:number;username:string;jumpId:string;fingerprint:string};dependencies:string[];enabled:boolean;version:number;status:string;lastSeen:string;message:string;hasPassword:boolean;hasSshPassword:boolean;hasPrivateKey:boolean;hasPassphrase:boolean};
+export type AssetKind='server'|'application'|'postgres'|'mysql'|'mariadb'|'oracle'|'redis'|'http';
+export type Asset={id:string;name:string;kind:AssetKind;address:string;port:number;username:string;database:string;tlsMode:string;oracleConnectMode?:''|'service'|'sid';os:string;metricsUrl:string;environment:string;ssh:{host:string;port:number;username:string;jumpId:string;fingerprint:string};dependencies:string[];enabled:boolean;version:number;status:string;lastSeen:string;message:string;hasPassword:boolean;hasSshPassword:boolean;hasPrivateKey:boolean;hasPassphrase:boolean};
 export type AssetInput=Partial<Asset>&{password?:string;sshPassword?:string;privateKey?:string;passphrase?:string};
-export const assetLabels:Record<AssetKind,string>={server:'서버',application:'애플리케이션',postgres:'PostgreSQL',redis:'Redis · 캐시',http:'웹 · HTTP'};
+export const assetLabels:Record<AssetKind,string>={server:'서버',application:'애플리케이션',postgres:'PostgreSQL',mysql:'MySQL',mariadb:'MariaDB',oracle:'Oracle',redis:'Redis · 캐시',http:'웹 · HTTP'};
+export const sqlDatabaseKinds:readonly AssetKind[]=['postgres','mysql','mariadb','oracle'];
+export const isSQLDatabase=(kind:string|undefined)=>sqlDatabaseKinds.includes(kind as AssetKind);
+export const defaultPorts:Partial<Record<AssetKind,number>>={server:22,postgres:5432,mysql:3306,mariadb:3306,oracle:1521,redis:6379};
+export const databaseProfiles:Record<string,string[]>={
+ postgres:['db-up','db-probe','db-connections','db-transactions','db-buffer','db-rollback','db-locks','db-deadlocks','db-replication'],
+ mysql:['db-up','db-probe','db-connections','db-connection-usage','db-active','db-connection-limit','db-statements','mysql-buffer-hit','db-slow-queries','db-lock-waiters','db-lock-waits','db-network-in','db-network-out','db-uptime','db-monitoring-ready'],
+ mariadb:['db-up','db-probe','db-connections','db-connection-usage','db-active','db-connection-limit','db-statements','mysql-buffer-hit','db-slow-queries','db-lock-waiters','db-lock-waits','db-network-in','db-network-out','db-uptime','db-monitoring-ready'],
+ oracle:['db-up','db-probe','db-connections','db-active','db-connection-usage','db-connection-limit','db-statements','db-transactions','db-rollback','oracle-buffer-hit','db-lock-waiters','db-network-in','db-network-out','db-monitoring-ready'],
+};
 export const statusLabels:Record<string,string>={draft:'등록 초안',connecting:'연결 확인 중',connected:'수집 중',paused:'일시정지',error:'연결 확인 필요'};
 export function scopeSnapshot(snapshot:Snapshot,id:string):Snapshot{
  const asset=snapshot.assets?.find(a=>a.id===id);

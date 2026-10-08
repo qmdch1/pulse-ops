@@ -37,6 +37,17 @@ func (s *Service) seed(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
+	if os.Getenv("CONTROL_TEST_DATABASES") == "true" {
+		for _, a := range []Asset{
+			{Name: "MySQL · test", Kind: "mysql", Address: "mysql", Port: 3306, Username: "pulse_observer", Database: "pulse_test", TLSMode: "disable"},
+			{Name: "MariaDB · test", Kind: "mariadb", Address: "mariadb", Port: 3306, Username: "pulse_observer", Database: "pulse_test", TLSMode: "disable"},
+			{Name: "Oracle · test", Kind: "oracle", Address: "oracle", Port: 1521, Username: "pulse_observer", Database: "FREEPDB1", OracleConnectMode: "service", TLSMode: "disable"},
+		} {
+			if _, err := add(a, Secrets{Password: "pulse_test_only"}); err != nil {
+				return err
+			}
+		}
+	}
 	cache, e := add(Asset{Name: "Redis · test", Kind: "redis", Address: "redis", Port: 6379}, Secrets{})
 	if e != nil {
 		return e

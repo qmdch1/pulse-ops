@@ -1,5 +1,6 @@
 import type {Snapshot,Incident,MetricResult} from './types';
 import {metricById} from './catalog.ts';
+import {databaseEvidence} from './database-evidence.ts';
 export function sustained(metric:MetricResult|undefined, predicate:(n:number)=>boolean, seconds:number,end:number,step:number){
  if(!metric||metric.state!=='ok')return false;
  return metric.series.some(series=>{
@@ -30,7 +31,12 @@ export const simpleRules:[string,string,(n:number)=>boolean,Incident['severity']
  ['disk','디스크 용량 압박',n=>n>85,'warning','detected','마운트별 여유 공간과 파일 증가량을 확인하세요.'],
  ['inode','inode 소진 위험',n=>n>90,'warning','detected','작은 파일 증가와 보존 정책을 확인하세요.'],
  ['file-descriptors','파일·소켓 한계 접근',n=>n>80,'warning','detected','연결 해제 누락과 파일 디스크립터 한계를 점검하세요.'],
- ['db-up','PostgreSQL 연결 실패',n=>n<1,'critical','detected','DB 서비스 상태와 등록한 계정 접근을 확인하세요.'],
+ ['db-up','DB 연결 실패',n=>n<1,'critical','detected','DB 서비스 상태와 등록한 계정 접근을 확인하세요.'],
+ ['db-probe','DB 읽기 응답 지연',n=>n>200,'warning','detected','DB 왕복 시간과 연결 한도·활성 세션·잠금 대기를 함께 확인하세요. 업무 쿼리 P99와는 다른 측정입니다.'],
+ ['db-connection-usage','DB 연결·세션 한도 접근',n=>n>80,'warning','detected','최대 연결 설정과 활성 세션·연결 반환 여부를 확인하세요.'],
+ ['db-lock-waiters','DB 잠금 대기 지속',n=>n>0,'warning','detected','차단 트랜잭션과 처리 중 세션, 애플리케이션 응답 지연을 확인하세요.'],
+ ['db-slow-queries','느린 DB 명령 증가',n=>n>1,'warning','detected','DB의 느린 쿼리 기준과 인덱스·실행 계획을 확인하세요.'],
+ ['db-monitoring-ready','DB 통계 일부 수집 실패',n=>n<1,'warning','collection','DB 연결은 가능하지만 일부 통계를 읽지 못했습니다. 모니터링 권한·DB 버전·쿼리 제한을 확인하세요.'],
  ['redis-up','Redis 연결 실패',n=>n<1,'critical','detected','Redis 서비스 상태와 등록한 계정 접근을 확인하세요.'],
  ['db-replication','DB 복제 지연',n=>n>30,'warning','detected','복제 네트워크와 WAL 적용 지연을 점검하세요.'],
  ['db-deadlocks','DB 데드락 발생',n=>n>0,'warning','detected','잠금 순서와 트랜잭션 경계를 확인하세요.'],
@@ -80,7 +86,7 @@ export function detectIncidents(snapshot:Snapshot):Incident[]{
  if(holds('slo-burn',n=>n>14.4)&&holds('slo-burn-hour',n=>n>14.4))add('slo','빠른 오류 예산 소진','predicted','critical',['slo-burn','slo-burn-hour','errors'],'99.9% 목표 기준 5분·1시간 창 모두 14.4배를 초과합니다.',['서비스별 승인 SLO 목표를 확인하세요.','변경 중단과 복구 우선순위를 검토하세요.']);
  if(value('deployment')!==null&&value('deployment')!<30&&holds('p99',n=>n>500,600))add('post-deploy','배포 후 지연 회복 지연','detected','warning',['deployment','p99','canary'],'최근 배포 이후 10분간 지연 기준을 초과했습니다.',['버전별·동일 부하로 카나리와 이전 버전을 비교하세요.','승인된 롤백 기준과 대조하세요.']);
  for(const [id,title,test,severity,kind,step]of simpleRules)if(holds(id,test,kind==='expiring'?30:60)){
-  add(id,title,kind,severity,[id],'선택 범위에서 기준 초과가 지속 관측되었습니다.',[step]);
+  add(id,title,kind,severity,databaseEvidence[id]||[id],'선택 범위에서 기준 초과가 지속 관측되었습니다.',[step]);
   if(kind==='expiring'&&value(id)!==null){const factor=id==='cookie-expiry'?60:id==='tls-expiry'?86400:3600;incidents.at(-1)!.evidence.push(`만료 시각: ${new Date((snapshot.end+value(id)!*factor)*1000).toISOString()} (UTC)`);}
  }
  const known:Record<string,string>={HighServerErrorRatio:'errors',HighTailLatency:'latency',SessionExpiryApproaching:'cookie-expiry',TargetUnavailable:'targets-down',DatabaseExporterUnavailable:'db-up',CacheExporterUnavailable:'redis-up',DiskFullIn24Hours:'disk-risk'};
