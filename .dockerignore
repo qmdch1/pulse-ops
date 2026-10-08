@@ -1,0 +1,16 @@
+node_modules
+.git
+.next
+dist
+.wrangler
+.sites-runtime
+.local
+.env*
+!.env.example
+!.env.prod.example
+*.tar.gz
+*.zip
+*.log
+docs
+tests
+monitoring

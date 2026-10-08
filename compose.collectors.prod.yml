@@ -1,0 +1,25 @@
+# Optional collectors for approved external databases. No demo workloads.
+name: pulse-ops-collectors-production
+services:
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.17.1
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: ${POSTGRES_MONITOR_DSN:?Set a read-only monitoring DSN with TLS}
+    ports: ['127.0.0.1:19187:9187']
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 128m
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.73.0
+    restart: unless-stopped
+    environment:
+      REDIS_ADDR: ${REDIS_MONITOR_URL:?Set the approved Redis URL, rediss for TLS}
+      REDIS_USER: ${REDIS_MONITOR_USER:?Set a restricted monitoring ACL user}
+      REDIS_PASSWORD: ${REDIS_MONITOR_PASSWORD:?Set the monitoring password}
+    ports: ['127.0.0.1:19121:9121']
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 128m

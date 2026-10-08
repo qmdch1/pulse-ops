@@ -1,0 +1,23 @@
+# Fill approved addresses. Never promote prometheus.test.yml.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+  external_labels: {environment: production}
+scrape_configs:
+  - job_name: application
+    scheme: https
+    static_configs:
+      - targets: ['approved-application.example.invalid:443']
+    authorization:
+      credentials_file: /run/secrets/application_metrics_token
+    tls_config:
+      insecure_skip_verify: false
+  - job_name: node
+    static_configs:
+      - targets: ['approved-linux-host.example.invalid:9100']
+  - job_name: postgres
+    static_configs:
+      - targets: ['approved-exporter-host.example.invalid:19187']
+  - job_name: redis
+    static_configs:
+      - targets: ['approved-exporter-host.example.invalid:19121']

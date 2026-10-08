@@ -1,0 +1,38 @@
+groups:
+  - name: pulse_ops
+    rules:
+      - alert: TargetUnavailable
+        expr: up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: '수집 대상 응답 중단'}
+      - alert: HighServerErrorRatio
+        expr: sum by (job, instance) (rate(http_requests_total{status=~"5.."}[5m])) / clamp_min(sum by (job, instance) (rate(http_requests_total[5m])), 0.001) > 0.02
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: '서버 오류율이 2분 동안 2%를 초과'}
+      - alert: HighTailLatency
+        expr: histogram_quantile(0.99, sum by (le, job, instance) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 2m
+        labels: {severity: warning}
+        annotations: {summary: 'P99가 2분 동안 500ms를 초과'}
+      - alert: SessionExpiryApproaching
+        expr: (session_cookie_expiry_timestamp_seconds - time()) < 3600
+        for: 30s
+        labels: {severity: warning}
+        annotations: {summary: '인증 세션 만료 1시간 이내 또는 만료됨'}
+      - alert: DatabaseExporterUnavailable
+        expr: pg_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'PostgreSQL 연결 실패'}
+      - alert: CacheExporterUnavailable
+        expr: redis_up == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations: {summary: 'Redis 연결 실패'}
+      - alert: DiskFullIn24Hours
+        expr: (predict_linear(app_disk_free_bytes[6h], 24 * 3600) < 0) and app_disk_free_bytes offset 6h
+        for: 15m
+        labels: {severity: warning}
+        annotations: {summary: '최근 6시간 선형 추세 기준 24시간 이내 디스크 소진 가능'}

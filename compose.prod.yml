@@ -1,0 +1,25 @@
+name: pulse-ops-production
+services:
+  dashboard:
+    build: .
+    image: pulse-ops:1.0.0
+    restart: unless-stopped
+    init: true
+    environment:
+      MONITORING_MODE: production
+      PROMETHEUS_URL: ${PROMETHEUS_URL:?Set the approved Prometheus URL}
+      PROMETHEUS_TOKEN: ${PROMETHEUS_TOKEN:-}
+      GRAFANA_PUBLIC_URL: ${GRAFANA_PUBLIC_URL:-}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:?Set an operator username}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?Set a unique password of at least 24 characters}
+    ports: ['127.0.0.1:${DASHBOARD_PORT:-13000}:3000']
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    mem_limit: 512m
+    cpus: 1
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: '3'}
