@@ -362,7 +362,8 @@ func (s *Service) collectPostgres(ctx context.Context, record StoredAsset) (map[
 		return nil, nil, e
 	}
 	defer closeDial()
-	config.DialFunc = dial
+	// Close the socket when the collection budget ends, even inside the driver.
+	config.DialFunc = collectionDial(ctx, dial).DialContext
 	config.ConnectTimeout = 8 * time.Second
 	config.RuntimeParams["default_transaction_read_only"] = "on"
 	config.RuntimeParams["statement_timeout"] = "3000"
@@ -427,6 +428,7 @@ func (s *Service) collectRedis(ctx context.Context, record StoredAsset) (map[str
 		return nil, nil, e
 	}
 	defer closeDial()
+	dial = collectionDial(ctx, dial)
 	options := &redis.Options{Addr: net.JoinHostPort(a.Address, strconv.Itoa(port)), Username: a.Username, Password: record.Secrets.Password, Protocol: 2, MaxRetries: 0, PoolSize: 1, DialTimeout: 8 * time.Second, ReadTimeout: 3 * time.Second, WriteTimeout: 3 * time.Second, Dialer: dial}
 	if a.TLSMode == "verify-full" {
 		options.Dialer = func(ctx context.Context, network, address string) (net.Conn, error) {

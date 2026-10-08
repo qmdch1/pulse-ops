@@ -148,6 +148,12 @@ func (s *Service) webHandler(mode, user, password, inventory string) http.Handle
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// Test mode has no operator login. Serve only the configured origin hosts so
+		// a DNS-rebinding page cannot read the unauthenticated API.
+		if mode == "test" && !s.allowedHost(r.Host) {
+			fail(w, 403, "허용된 주소로 접속하세요")
+			return
+		}
 		if mode != "test" {
 			if mode != "production" || user == "" || len(password) < 24 {
 				fail(w, 503, "운영 접근 계정을 설정하세요")

@@ -11,6 +11,9 @@ import (
 	"time"
 )
 
+// testSeedBuild marks the isolated Compose test binary (go build -tags testseed).
+const testSeedBuild = true
+
 // Only the explicitly isolated Compose test environment may register these assets.
 func (s *Service) seed(ctx context.Context) error {
 	existing, err := s.store.All()

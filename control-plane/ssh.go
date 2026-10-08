@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -164,7 +165,37 @@ func (s *Service) dialer(ctx context.Context, a Asset) (func(context.Context, st
 	if e != nil {
 		return nil, func() {}, e
 	}
-	return conn.Dial, conn.Close, nil
+	return tunnelDial(conn.Dial), conn.Close, nil
+}
+
+// SSH forwarding channels reject SetReadDeadline/SetWriteDeadline, and drivers
+// rely on those calls for timeouts and context cancellation (go-redis fails,
+// pgx silently blocks). Every connection through a jump host therefore gets a
+// local pipe that supplies deadline semantics while all bytes still travel
+// through the verified SSH channel. Closing either direction closes the bridge.
+type jumpTunnel struct {
+	net.Conn
+	peer     net.Conn
+	upstream net.Conn
+	once     sync.Once
+}
+
+func (c *jumpTunnel) Close() error {
+	c.once.Do(func() { c.Conn.Close(); c.peer.Close(); c.upstream.Close() })
+	return nil
+}
+func tunnelDial(dial databaseDial) databaseDial {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		upstream, err := dial(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		local, peer := net.Pipe()
+		bridge := &jumpTunnel{Conn: local, peer: peer, upstream: upstream}
+		go func() { io.Copy(upstream, peer); bridge.Close() }()
+		go func() { io.Copy(peer, upstream); bridge.Close() }()
+		return bridge, nil
+	}
 }
 func readCommand(ctx context.Context, conn *SSHConnection, command string) (string, error) {
 	session, e := conn.Session()

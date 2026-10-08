@@ -10,7 +10,6 @@ import (
 	"net"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -21,34 +20,6 @@ type databaseDial func(context.Context, string, string) (net.Conn, error)
 
 func (d databaseDial) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	return d(ctx, network, address)
-}
-
-// SSH forwarding channels reject SetReadDeadline/SetWriteDeadline. A local pipe
-// supplies those semantics to SQL drivers while all bytes still travel through
-// the verified SSH channel. Closing either direction closes the whole bridge.
-type databaseTunnel struct {
-	net.Conn
-	peer     net.Conn
-	upstream net.Conn
-	once     sync.Once
-}
-
-func (c *databaseTunnel) Close() error {
-	c.once.Do(func() { c.Conn.Close(); c.peer.Close(); c.upstream.Close() })
-	return nil
-}
-func tunnelDatabaseDial(dial databaseDial) databaseDial {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		upstream, err := dial(ctx, network, address)
-		if err != nil {
-			return nil, err
-		}
-		local, peer := net.Pipe()
-		bridge := &databaseTunnel{Conn: local, peer: peer, upstream: upstream}
-		go func() { io.Copy(upstream, peer); bridge.Close() }()
-		go func() { io.Copy(peer, upstream); bridge.Close() }()
-		return bridge, nil
-	}
 }
 
 // Keep the absolute collection deadline even if a driver resets socket deadlines.
@@ -158,9 +129,6 @@ func (s *Service) collectMySQL(ctx context.Context, record StoredAsset) (map[str
 		return nil, nil, err
 	}
 	defer closeDial()
-	if record.Asset.SSH.JumpID != "" {
-		dial = tunnelDatabaseDial(dial)
-	}
 	connector, err := mysql.NewConnector(mysqlConfig(record, collectionDial(ctx, dial)))
 	if err != nil {
 		return nil, nil, errors.New("MySQL / MariaDB 연결 정보를 확인하세요")
@@ -229,9 +197,6 @@ func (s *Service) collectOracle(ctx context.Context, record StoredAsset) (map[st
 		return nil, nil, err
 	}
 	defer closeDial()
-	if record.Asset.SSH.JumpID != "" {
-		dial = tunnelDatabaseDial(dial)
-	}
 	connector := go_ora.NewConnector(dsn).(*go_ora.OracleConnector)
 	connector.Dialer(collectionDial(ctx, dial))
 	connector.WithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, ServerName: record.Asset.Address})

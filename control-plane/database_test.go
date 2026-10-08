@@ -112,7 +112,7 @@ func TestDatabaseCollectionCancelsSocket(t *testing.T) {
 func TestDatabaseTunnelDeadline(t *testing.T) {
 	upstream, server := net.Pipe()
 	defer server.Close()
-	dial := tunnelDatabaseDial(func(context.Context, string, string) (net.Conn, error) { return upstream, nil })
+	dial := tunnelDial(func(context.Context, string, string) (net.Conn, error) { return upstream, nil })
 	conn, err := dial(context.Background(), "tcp", "unused")
 	if err != nil {
 		t.Fatal(err)

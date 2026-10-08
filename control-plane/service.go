@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -52,6 +54,14 @@ func (s *Service) originHosts() []string {
 		out = append(out, u.Host)
 	}
 	return out
+}
+func (s *Service) allowedHost(host string) bool {
+	for _, allowed := range s.originHosts() {
+		if strings.EqualFold(allowed, host) {
+			return true
+		}
+	}
+	return false
 }
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -329,10 +339,28 @@ func (s *Service) run(ctx context.Context) {
 		}
 	}
 }
+
+// MONITORING_MODE=test turns operator authentication off. Outside the isolated
+// testseed build, start it only on a listener other hosts cannot reach.
+func testModeAllowed(address string, seedBuild bool) error {
+	if seedBuild {
+		return nil
+	}
+	if host, _, e := net.SplitHostPort(address); e == nil {
+		if ip := net.ParseIP(host); host == "localhost" || (ip != nil && ip.IsLoopback()) {
+			return nil
+		}
+	}
+	return fmt.Errorf("MONITORING_MODE=test disables authentication and needs a loopback CONTROL_LISTEN such as 127.0.0.1:13000 (got %q)", address)
+}
 func main() {
 	dir := os.Getenv("CONTROL_DATA_DIR")
 	if dir == "" {
 		dir = "./data"
+	}
+	address := os.Getenv("CONTROL_LISTEN")
+	if address == "" {
+		address = "127.0.0.1:7080"
 	}
 	mode := os.Getenv("MONITORING_MODE")
 	if mode != "test" {
@@ -340,6 +368,14 @@ func main() {
 		if os.Getenv("CONTROL_MASTER_KEY") == "" || os.Getenv("DASHBOARD_USERNAME") == "" || len(os.Getenv("DASHBOARD_PASSWORD")) < 24 || os.Getenv("CONTROL_ALLOWED_ORIGINS") == "" {
 			log.Fatal("Production requires an encryption key, operator credentials and allowed origins")
 		}
+	} else {
+		if e := testModeAllowed(address, testSeedBuild); e != nil {
+			log.Fatal(e)
+		}
+		if os.Getenv("CONTROL_ALLOWED_ORIGINS") == "" {
+			log.Fatal("Test mode requires CONTROL_ALLOWED_ORIGINS")
+		}
+		log.Printf("WARNING: MONITORING_MODE=test disables operator authentication; only requests for %s are served", os.Getenv("CONTROL_ALLOWED_ORIGINS"))
 	}
 	store, e := openStore(dir)
 	if e != nil {
@@ -358,10 +394,6 @@ func main() {
 		}
 	}
 	go service.run(ctx)
-	address := os.Getenv("CONTROL_LISTEN")
-	if address == "" {
-		address = "127.0.0.1:7080"
-	}
 	server := &http.Server{Addr: address, Handler: service.webHandler(mode, os.Getenv("DASHBOARD_USERNAME"), os.Getenv("DASHBOARD_PASSWORD"), os.Getenv("SSH_INVENTORY_FILE")), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()

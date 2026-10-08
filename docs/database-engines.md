@@ -45,6 +45,8 @@ docker run --rm --network pulse-ops-test_default \
   alpine:3.23 /tests -test.run=TestIntegrationDatabaseEngines -test.v
 ```
 
+기본 테스트 Compose만으로 PostgreSQL·Redis의 직접/SSH bastion 경유 수집을 확인하려면 같은 명령에서 `-e PULSE_TEST_SSH_JUMP=true`와 `-test.run=TestIntegrationJumpPostgresRedis`를 사용합니다.
+
 테스트는 세 엔진의 직접 연결/SSH 경유 수집, 잘못된 비밀번호 거부, 검증되지 않은 TLS 거부, Oracle SID, Oracle 권한 부족 상태를 검증합니다. 운영용 인증서로 성공하는 TLS/mTLS, Oracle RAC, 모든 과거 버전의 호환성을 검증한 것은 아닙니다.
 
 ## 구현 참고

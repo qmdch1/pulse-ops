@@ -149,24 +149,62 @@ func TestMetricResultsNullZeroFreshnessAndScope(t *testing.T) {
 }
 
 func TestMonitoringValidationAndEmbeddedCatalog(t *testing.T) {
-	s := newService(testStore(t), nil)
+	s := newService(testStore(t), []string{"http://localhost:13000"})
 	h := s.webHandler("test", "", "", "")
-	for _, path := range []string{"/api/monitoring?range=1", "/api/monitoring?range=900&range=3600", "/api/monitoring?query=up", "/api/monitoring?url=http://example.invalid"} {
+	get := func(path string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", path, nil)
+		r.Host = "localhost:13000"
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
-		if w.Code != 400 {
+		h.ServeHTTP(w, r)
+		return w
+	}
+	for _, path := range []string{"/api/monitoring?range=1", "/api/monitoring?range=900&range=3600", "/api/monitoring?query=up", "/api/monitoring?url=http://example.invalid"} {
+		if get(path).Code != 400 {
 			t.Fatalf("invalid query allowed: %s", path)
 		}
 	}
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/monitoring?instance=unknown", nil))
-	if w.Code != 404 {
+	if get("/api/monitoring?instance=unknown").Code != 404 {
 		t.Fatal("unknown asset did not fail")
 	}
-	w = httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest("GET", "/api/monitoring?range=900", nil))
+	w := get("/api/monitoring?range=900")
 	var body snapshot
 	if json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.Connected || len(body.Metrics) != 119 || body.Assets == nil {
 		t.Fatal("empty registry contract invalid")
+	}
+}
+
+func TestTestModeRequiresIsolatedListener(t *testing.T) {
+	for _, tc := range []struct {
+		address   string
+		seedBuild bool
+		allowed   bool
+	}{
+		{"127.0.0.1:13000", false, true}, {"[::1]:7080", false, true}, {"localhost:7080", false, true},
+		{"0.0.0.0:7080", false, false}, {":7080", false, false}, {"10.12.15.218:7080", false, false}, {"[::]:7080", false, false}, {"not-an-address", false, false},
+		{"0.0.0.0:7080", true, true},
+	} {
+		if err := testModeAllowed(tc.address, tc.seedBuild); (err == nil) != tc.allowed {
+			t.Fatalf("%q seed=%v: allowed=%v, err %v", tc.address, tc.seedBuild, tc.allowed, err)
+		}
+	}
+}
+
+func TestTestModeServesOnlyConfiguredHosts(t *testing.T) {
+	s := newService(testStore(t), []string{"http://localhost:13000", "http://127.0.0.1:13000"})
+	h := s.webHandler("test", "", "", "")
+	for path, cases := range map[string]map[string]int{
+		"/api/control/assets": {"localhost:13000": 200, "LOCALHOST:13000": 200, "127.0.0.1:13000": 200, "rebind.attacker.invalid": 403, "localhost:9999": 403},
+		"/":                   {"localhost:13000": 200, "rebind.attacker.invalid": 403},
+		"/api/health":         {"127.0.0.1:7080": 200},
+	} {
+		for host, code := range cases {
+			r := httptest.NewRequest("GET", path, nil)
+			r.Host = host
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if w.Code != code {
+				t.Fatalf("GET %s Host %q: %d, want %d", path, host, w.Code, code)
+			}
+		}
 	}
 }
