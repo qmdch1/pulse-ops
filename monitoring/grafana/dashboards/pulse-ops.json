@@ -2971,12 +2971,66 @@
     {
       "id": 60,
       "type": "timeseries",
-      "title": "Redis 키 적중률",
-      "description": "Redis 전체 키 검색 기준 적중률입니다.",
+      "title": "Redis 연결 상태",
+      "description": "exporter 자체의 수집 성공과 Redis 접속 가능 여부를 구분합니다.",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
+        "y": 228
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "pulse-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "min(redis_up{instance=~\".+\"})",
+          "legendFormat": "{{instance}} {{version}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 61,
+      "type": "timeseries",
+      "title": "Redis 키 적중률",
+      "description": "최근 5분 Redis 키 검색 기준입니다. 현재 접근 가능 여부는 Redis 연결 상태에서 확인합니다.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
         "y": 228
       },
       "datasource": {
@@ -3023,15 +3077,15 @@
       }
     },
     {
-      "id": 61,
+      "id": 62,
       "type": "timeseries",
       "title": "Redis 메모리 사용률",
       "description": "maxmemory가 0이면 제한 없음이며 비율은 측정 불가입니다.",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 228
+        "x": 0,
+        "y": 236
       },
       "datasource": {
         "type": "prometheus",
@@ -3077,14 +3131,14 @@
       }
     },
     {
-      "id": 62,
+      "id": 63,
       "type": "timeseries",
       "title": "캐시 키 축출",
       "description": "메모리 한계 때문에 제거된 키의 속도입니다.",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 236
       },
       "datasource": {
@@ -3131,15 +3185,15 @@
       }
     },
     {
-      "id": 63,
+      "id": 64,
       "type": "timeseries",
       "title": "캐시 키 TTL 만료",
       "description": "캐시 스탬피드 후보를 DB 요청량과 확인합니다.",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 236
+        "x": 0,
+        "y": 244
       },
       "datasource": {
         "type": "prometheus",
@@ -3181,14 +3235,14 @@
       }
     },
     {
-      "id": 64,
+      "id": 65,
       "type": "timeseries",
       "title": "Redis 대기 클라이언트",
       "description": "블로킹 명령으로 대기하는 클라이언트 수입니다.",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 244
       },
       "datasource": {
@@ -3235,7 +3289,7 @@
       }
     },
     {
-      "id": 65,
+      "id": 66,
       "type": "row",
       "title": "네트워크 & 큐",
       "gridPos": {
@@ -3247,7 +3301,7 @@
       "collapsed": false
     },
     {
-      "id": 66,
+      "id": 67,
       "type": "timeseries",
       "title": "네트워크 수신",
       "description": "루프백을 제외한 수신 처리량입니다.",
@@ -3297,7 +3351,7 @@
       }
     },
     {
-      "id": 67,
+      "id": 68,
       "type": "timeseries",
       "title": "네트워크 송신",
       "description": "루프백을 제외한 송신 처리량입니다.",
@@ -3347,7 +3401,7 @@
       }
     },
     {
-      "id": 68,
+      "id": 69,
       "type": "timeseries",
       "title": "패킷 드롭",
       "description": "수신·송신 큐와 NIC 상태를 확인합니다.",
@@ -3401,7 +3455,7 @@
       }
     },
     {
-      "id": 69,
+      "id": 70,
       "type": "timeseries",
       "title": "TCP 재전송률",
       "description": "네트워크 손실·혼잡 후보입니다.",
@@ -3455,7 +3509,7 @@
       }
     },
     {
-      "id": 70,
+      "id": 71,
       "type": "timeseries",
       "title": "HTTP 가용성",
       "description": "외부 관점 HTTP probe 성공 여부입니다.",
@@ -3509,7 +3563,7 @@
       }
     },
     {
-      "id": 71,
+      "id": 72,
       "type": "timeseries",
       "title": "HTTP Probe 응답",
       "description": "DNS·TCP·TLS·HTTP를 포함한 probe 전체 시간입니다.",
@@ -3563,7 +3617,7 @@
       }
     },
     {
-      "id": 72,
+      "id": 73,
       "type": "timeseries",
       "title": "DNS 조회 시간",
       "description": "외부 요청 도달 실패를 진단하는 DNS 지연입니다.",
@@ -3617,7 +3671,7 @@
       }
     },
     {
-      "id": 73,
+      "id": 74,
       "type": "timeseries",
       "title": "프런트 활성 연결",
       "description": "Nginx가 현재 유지하는 활성 연결 수입니다.",
@@ -3667,7 +3721,7 @@
       }
     },
     {
-      "id": 74,
+      "id": 75,
       "type": "timeseries",
       "title": "작업 큐 깊이",
       "description": "소비 속도보다 유입 속도가 큰 상태의 누적량입니다.",
@@ -3721,7 +3775,7 @@
       }
     },
     {
-      "id": 75,
+      "id": 76,
       "type": "timeseries",
       "title": "가장 오래된 작업 대기",
       "description": "큐 길이보다 사용자 영향에 가까운 대기 시간입니다.",
@@ -3775,7 +3829,7 @@
       }
     },
     {
-      "id": 76,
+      "id": 77,
       "type": "timeseries",
       "title": "메시지 소비 지연",
       "description": "Kafka 소비자 그룹의 미처리 메시지 수입니다.",
@@ -3829,7 +3883,7 @@
       }
     },
     {
-      "id": 77,
+      "id": 78,
       "type": "timeseries",
       "title": "애플리케이션 재시도",
       "description": "원 요청량과 분리한 재시도 발생량입니다.",
@@ -3883,7 +3937,7 @@
       }
     },
     {
-      "id": 78,
+      "id": 79,
       "type": "timeseries",
       "title": "흐름 제어 거부율 · 429",
       "description": "배압으로 거부한 요청 비율. 무한 대기열 증가와 구분합니다.",
@@ -3937,7 +3991,7 @@
       }
     },
     {
-      "id": 79,
+      "id": 80,
       "type": "timeseries",
       "title": "게이트웨이 504",
       "description": "백엔드 성공률과 모순될 때 타임아웃 예산을 점검합니다.",
@@ -3991,7 +4045,7 @@
       }
     },
     {
-      "id": 80,
+      "id": 81,
       "type": "timeseries",
       "title": "게이트웨이 타임아웃 예산",
       "description": "바깥 계층의 허용 시간입니다.",
@@ -4041,7 +4095,7 @@
       }
     },
     {
-      "id": 81,
+      "id": 82,
       "type": "timeseries",
       "title": "DB 타임아웃 예산",
       "description": "안쪽 계층의 한계는 바깥 계층보다 짧아야 합니다.",
@@ -4091,7 +4145,7 @@
       }
     },
     {
-      "id": 82,
+      "id": 83,
       "type": "timeseries",
       "title": "요청 타임아웃",
       "description": "서버 요청 타임아웃을 실패·재시도와 함께 확인합니다.",
@@ -4145,7 +4199,7 @@
       }
     },
     {
-      "id": 83,
+      "id": 84,
       "type": "row",
       "title": "인증 & 만료",
       "gridPos": {
@@ -4157,7 +4211,7 @@
       "collapsed": false
     },
     {
-      "id": 84,
+      "id": 85,
       "type": "timeseries",
       "title": "쿠키 만료까지",
       "description": "관리 대상 쿠키의 서버 측 만료 메타데이터만 사용합니다. 음수는 만료입니다. 세션 쿠키는 명시 만료가 없을 수 있습니다.",
@@ -4211,7 +4265,7 @@
       }
     },
     {
-      "id": 85,
+      "id": 86,
       "type": "timeseries",
       "title": "Secure 쿠키 정책",
       "description": "허가된 대상의 보안 속성만 수집하며 쿠키 값은 수집하지 않습니다.",
@@ -4265,7 +4319,7 @@
       }
     },
     {
-      "id": 86,
+      "id": 87,
       "type": "timeseries",
       "title": "HttpOnly 쿠키 정책",
       "description": "브라우저 JS로 HttpOnly 쿠키를 읽지 않습니다. 서버 측 계측이 필요합니다.",
@@ -4319,7 +4373,7 @@
       }
     },
     {
-      "id": 87,
+      "id": 88,
       "type": "timeseries",
       "title": "SameSite 쿠키 정책",
       "description": "인증 서비스가 검증한 SameSite 정책의 유효 여부입니다.",
@@ -4373,7 +4427,7 @@
       }
     },
     {
-      "id": 88,
+      "id": 89,
       "type": "timeseries",
       "title": "TLS 인증서 만료까지",
       "description": "인증서 체인 중 가장 빠른 만료까지의 기간입니다.",
@@ -4427,7 +4481,7 @@
       }
     },
     {
-      "id": 89,
+      "id": 90,
       "type": "timeseries",
       "title": "서비스 토큰 만료까지",
       "description": "토큰 값 없이 관리 대상 자격 증명의 만료 시각만 수집합니다.",
@@ -4481,7 +4535,7 @@
       }
     },
     {
-      "id": 90,
+      "id": 91,
       "type": "timeseries",
       "title": "인증 실패율",
       "description": "로그인·갱신 실패의 비율입니다. 사용자 식별값을 라벨에 담지 않습니다.",
@@ -4535,7 +4589,7 @@
       }
     },
     {
-      "id": 91,
+      "id": 92,
       "type": "timeseries",
       "title": "시스템 시계 편차",
       "description": "서명 검증·분산 추적 오류의 시계 동기화 원인을 확인합니다.",
@@ -4589,7 +4643,7 @@
       }
     },
     {
-      "id": 92,
+      "id": 93,
       "type": "row",
       "title": "배포 & 신뢰성",
       "gridPos": {
@@ -4601,7 +4655,7 @@
       "collapsed": false
     },
     {
-      "id": 93,
+      "id": 94,
       "type": "timeseries",
       "title": "정상 수집 대상",
       "description": "연결할 수 있는 수집 대상 수입니다. 서비스 정상과 동일하지 않습니다.",
@@ -4651,7 +4705,7 @@
       }
     },
     {
-      "id": 94,
+      "id": 95,
       "type": "timeseries",
       "title": "수집 중단 대상",
       "description": "수집 실패를 정상 0값과 분리합니다.",
@@ -4705,7 +4759,7 @@
       }
     },
     {
-      "id": 95,
+      "id": 96,
       "type": "timeseries",
       "title": "수집 소요 시간",
       "description": "scrape timeout에 가까워지는지 확인합니다.",
@@ -4759,7 +4813,7 @@
       }
     },
     {
-      "id": 96,
+      "id": 97,
       "type": "timeseries",
       "title": "마지막 관측 경과",
       "description": "마지막 시계열 표본 이후 경과 시간입니다.",
@@ -4813,7 +4867,7 @@
       }
     },
     {
-      "id": 97,
+      "id": 98,
       "type": "timeseries",
       "title": "오류 예산 소진 속도 · 5분",
       "description": "예시 SLO 99.9%의 허용 오류율 0.1%에 대한 비율. 운영 목표에 맞춰 규칙을 조정해야 합니다.",
@@ -4867,7 +4921,7 @@
       }
     },
     {
-      "id": 98,
+      "id": 99,
       "type": "timeseries",
       "title": "오류 예산 소진 속도 · 1시간",
       "description": "1시간과 5분 창이 동시에 임계값을 넘을 때 경보합니다.",
@@ -4921,7 +4975,7 @@
       }
     },
     {
-      "id": 99,
+      "id": 100,
       "type": "timeseries",
       "title": "성공 요청 비율",
       "description": "5xx 이외의 요청 비율. 업무 성공 SLI와 다를 수 있습니다.",
@@ -4975,7 +5029,7 @@
       }
     },
     {
-      "id": 100,
+      "id": 101,
       "type": "timeseries",
       "title": "마지막 배포 이후",
       "description": "버전별 배포 시각을 함께 수집합니다. 재시작도 변경으로 기록됩니다.",
@@ -5025,7 +5079,7 @@
       }
     },
     {
-      "id": 101,
+      "id": 102,
       "type": "timeseries",
       "title": "버전별 P99",
       "description": "배포 버전 라벨별 히스토그램을 따로 계산합니다.",
@@ -5075,7 +5129,7 @@
       }
     },
     {
-      "id": 102,
+      "id": 103,
       "type": "timeseries",
       "title": "4주 전 같은 시각 P99",
       "description": "4주 이상 보존된 데이터가 있어야 비교할 수 있습니다.",
@@ -5125,7 +5179,7 @@
       }
     },
     {
-      "id": 103,
+      "id": 104,
       "type": "timeseries",
       "title": "활성 경보 수",
       "description": "Prometheus가 지속 시간을 평가한 활성 경보 수입니다.",
@@ -5175,7 +5229,7 @@
       }
     },
     {
-      "id": 104,
+      "id": 105,
       "type": "timeseries",
       "title": "시간 동기화 상태",
       "description": "시스템 시간 동기화의 성공 여부입니다.",
@@ -5229,7 +5283,7 @@
       }
     },
     {
-      "id": 105,
+      "id": 106,
       "type": "state-timeline",
       "title": "경보 발생·해제 이력",
       "gridPos": {

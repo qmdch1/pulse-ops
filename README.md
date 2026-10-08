@@ -30,7 +30,7 @@ docker compose -f compose.test.yml up -d --scale demo-api=5
 
 - Next.js / React / TypeScript, Recharts, 접근성 UI primitives
 - Next standalone Docker 이미지 및 private Sites Worker 빌드
-- 97개 PromQL 지표 계약, 의미·단위·수집기·검토 기준·NULL 상태
+- 98개 PromQL 지표 계약, 의미·단위·수집기·검토 기준·NULL 상태
 - P50/P95/P97/P99/P99.9, API별/버전별 히스토그램, 1주/4주 비교
 - 지속 조건과 복합 근거를 사용하는 이벤트 규칙, 만료·용량 위험, 실제 ALERTS 발생·해제 이력
 - 이벤트 조사 패널: 당시 스냅샷, 근거, 점검 절차, 그래프, JSON 내보내기
@@ -86,3 +86,4 @@ Grafana 패널 재생성: `node --experimental-strip-types scripts/generate-graf
 설계 범위 대응표: `docs/coverage.md`.
 
 참고: [서버 모니터링 분석 가이드](https://kciter.so/posts/server-monitoring-analysis-guide/), [Prometheus histograms](https://prometheus.io/docs/practices/histograms/), [Google SRE monitoring](https://sre.google/sre-book/monitoring-distributed-systems/), [Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie).
+

@@ -56,7 +56,8 @@ add('database','db-buffer','DB 버퍼 캐시 적중률','%',ratio(rate('pg_stat_
 add('database','db-replication','복제 지연','초',`max(pg_replication_lag${s()})`,'복제 구성이 있는 경우에만 표시합니다.','Postgres exporter',30);
 add('database','db-locks','DB 배타 잠금 수','개',`sum(pg_locks_count${s('mode="accessexclusivelock"')})`,'배타 잠금 수. 실제 대기 상태는 DB 잠금 진단으로 확인합니다.','Postgres exporter');
 add('database','cache-hit','애플리케이션 캐시 적중률','%',ratio(rate('app_cache_requests_total','result="hit"'),rate('app_cache_requests_total')),'적중률 감소와 DB 처리량 증가를 같은 시각에 비교합니다.','Application',85,'below');
-add('database','redis-hit','Redis 키 적중률','%',ratio(rate('redis_keyspace_hits_total'),`${rate('redis_keyspace_hits_total')}+${rate('redis_keyspace_misses_total')}`),'Redis 전체 키 검색 기준 적중률입니다.','Redis exporter',85,'below');
+add('database','redis-up','Redis 연결 상태','0/1',`min(redis_up${s()})`,'exporter 자체의 수집 성공과 Redis 접속 가능 여부를 구분합니다.','Redis exporter',1,'below');
+add('database','redis-hit','Redis 키 적중률','%',ratio(rate('redis_keyspace_hits_total'),`${rate('redis_keyspace_hits_total')}+${rate('redis_keyspace_misses_total')}`),'최근 5분 Redis 키 검색 기준입니다. 현재 접근 가능 여부는 Redis 연결 상태에서 확인합니다.','Redis exporter',85,'below');
 add('database','redis-memory','Redis 메모리 사용률','%',`max(100*redis_memory_used_bytes${s()}/redis_memory_max_bytes${s()})`,'maxmemory가 0이면 제한 없음이며 비율은 측정 불가입니다.','Redis exporter',85);
 add('database','redis-evictions','캐시 키 축출','개/s',rate('redis_evicted_keys_total'),'메모리 한계 때문에 제거된 키의 속도입니다.','Redis exporter',1);
 add('database','redis-expired','캐시 키 TTL 만료','개/s',rate('redis_expired_keys_total'),'캐시 스탬피드 후보를 DB 요청량과 확인합니다.','Redis exporter');

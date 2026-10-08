@@ -61,6 +61,7 @@ export function detectIncidents(snapshot:Snapshot):Incident[]{
  ['inode','inode 소진 위험',n=>n>90,'warning','detected','작은 파일 증가와 보존 정책을 확인하세요.'],
  ['file-descriptors','파일·소켓 한계 접근',n=>n>80,'warning','detected','연결 해제 누락과 파일 디스크립터 한계를 점검하세요.'],
  ['db-up','PostgreSQL 연결 실패',n=>n<1,'critical','detected','DB 서비스 상태와 exporter 계정 접근을 확인하세요.'],
+ ['redis-up','Redis 연결 실패',n=>n<1,'critical','detected','Redis 서비스 상태와 exporter 계정 접근을 확인하세요.'],
  ['db-replication','DB 복제 지연',n=>n>30,'warning','detected','복제 네트워크와 WAL 적용 지연을 점검하세요.'],
  ['db-deadlocks','DB 데드락 발생',n=>n>0,'warning','detected','잠금 순서와 트랜잭션 경계를 확인하세요.'],
  ['db-rollback','DB 트랜잭션 롤백 증가',n=>n>5,'warning','detected','애플리케이션 예외와 트랜잭션 실패 사유를 확인하세요.'],
@@ -81,6 +82,11 @@ export function detectIncidents(snapshot:Snapshot):Incident[]{
  for(const [id,title,test,severity,kind,step]of simple)if(holds(id,test,kind==='expiring'?30:60)){
   add(id,title,kind,severity,[id],'선택 범위에서 기준 초과가 지속 관측되었습니다.',[step]);
   if(kind==='expiring'&&value(id)!==null){const factor=id==='cookie-expiry'?60:id==='tls-expiry'?86400:3600;incidents.at(-1)!.evidence.push(`만료 시각: ${new Date((snapshot.end+value(id)!*factor)*1000).toISOString()} (UTC)`);}
+ }
+ const known:Record<string,string>={HighServerErrorRatio:'errors',HighTailLatency:'latency',SessionExpiryApproaching:'cookie-expiry',TargetUnavailable:'targets-down',DatabaseExporterUnavailable:'db-up',CacheExporterUnavailable:'redis-up',DiskFullIn24Hours:'disk-risk'};
+ for(const alert of snapshot.alerts){
+   if(incidents.some(i=>i.id===known[alert.name]))continue;
+   incidents.push({id:`prom:${alert.name}:${alert.instance}`,title:alert.summary,severity:alert.state==='pending'?'notice':alert.severity==='critical'?'critical':'warning',kind:'detected',status:alert.state==='pending'?'pending':'firing',scope:alert.instance,summary:alert.state==='pending'?'Prometheus가 경보 지속 조건을 평가하고 있습니다.':'Prometheus의 지속 조건을 충족한 수집기 경보입니다.',metricIds:known[alert.name]&&metricById.has(known[alert.name])?[known[alert.name]]:[],evidence:[`경보: ${alert.name}`,`상태: ${alert.state}`,`관측 시작: ${alert.activeAt}`],steps:['경보의 대상과 지표 근거를 확인하세요.','Grafana에서 발생 전후 시계열을 비교하세요.'],value:alert.state==='pending'?'평가 중':'발생 중',unit:'',firstSeen:alert.activeAt});
  }
  return incidents.sort((a,b)=>({critical:0,warning:1,notice:2}[a.severity]-{critical:0,warning:1,notice:2}[b.severity]));
 }
