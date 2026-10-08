@@ -1,0 +1,1 @@
+import('./app.js').catch(error=>{const notice=document.querySelector('#notice');notice.hidden=false;notice.textContent='화면을 시작하지 못했습니다: '+error.message;document.querySelector('.loading')?.remove();console.error(error)});

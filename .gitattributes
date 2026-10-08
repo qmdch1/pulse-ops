@@ -1,0 +1,4 @@
+# Keep upstream distribution bytes identical to vendor/manifest.json on all OSes.
+control-plane/web/vendor/* -text
+# Upstream ESM distributions contain a trailing empty line; preserve it verbatim.
+control-plane/web/vendor/*.mjs whitespace=-blank-at-eof

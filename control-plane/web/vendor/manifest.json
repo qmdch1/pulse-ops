@@ -1,0 +1,31 @@
+{
+  "xterm": "6.0.0",
+  "addonFit": "0.11.0",
+  "files": [
+    {
+      "file": "xterm.mjs",
+      "source": "@xterm/xterm/lib/xterm.mjs",
+      "sha256": "bec0102a8078c404b37855f5502e5b43779808c213dc7e935c9188562108461c"
+    },
+    {
+      "file": "xterm.css",
+      "source": "@xterm/xterm/css/xterm.css",
+      "sha256": "854a7c0fb70e8b1a083c16797ab827299fb18744f5ad34f227b48337e33293c6"
+    },
+    {
+      "file": "xterm-LICENSE",
+      "source": "@xterm/xterm/LICENSE",
+      "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd"
+    },
+    {
+      "file": "addon-fit.mjs",
+      "source": "@xterm/addon-fit/lib/addon-fit.mjs",
+      "sha256": "67d5837d2afc1c533ab311f896373c45b43d50abdb39f215e24f0d89abc84dc9"
+    },
+    {
+      "file": "addon-fit-LICENSE",
+      "source": "@xterm/addon-fit/LICENSE",
+      "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f"
+    }
+  ]
+}

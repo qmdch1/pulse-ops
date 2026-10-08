@@ -32,7 +32,7 @@ def discover(path,platform):
         results.append({'alias':alias,'hostname':values.get('hostname',alias),'user':values.get('user','기본 사용자'),'port':values.get('port','22'),'proxyJump':values.get('proxyjump'),'platform':platform,'status':'not_connected','requiresReview':True})
     return results
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--config',action='append',default=[]);p.add_argument('--output',default='.local/ssh-inventory.json');args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--config',action='append',default=[]);p.add_argument('--output',default='.local/ssh/hosts.json');args=p.parse_args()
     defaults=[(pathlib.Path.home()/'.ssh/config','Windows' if os.name=='nt' else 'macOS' if sys.platform=='darwin' else 'Linux')]
     for extra in args.config:defaults.append((pathlib.Path(extra),'Imported'))
     hosts=[]

@@ -24,7 +24,7 @@
 | 추가: OS·DB·전송 | 디스크/inode/FD/swap/IOPS, DB 복제/잠금, 드롭/재전송 | 각 exporter |
 | 추가: 운영 신뢰성 | 수집 신선도, 오류 예산 2창, 시계 동기화, 재시작/OOM | 승인된 서비스 SLO와 런타임 계측 |
 
-총 지표는 `lib/monitoring/catalog.ts`, 이벤트의 실제 조건은 `lib/monitoring/rules.ts`, 브라우저가 닫혀 있어도 평가되는 지속 경보는 `monitoring/prometheus/rules.yml`에서 확인합니다. UI 복합 진단과 Prometheus 경보는 서로 다른 역할입니다. UI만의 복합 진단은 별도 통지 서비스를 실행하지 않습니다.
+총 지표는 `control-plane/web/data/metrics.json`, 이벤트의 실제 조건은 `control-plane/web/lib/rules.js`, 브라우저가 닫혀 있어도 평가되는 지속 경보는 `monitoring/prometheus/rules.yml`에서 확인합니다. UI 복합 진단과 Prometheus 경보는 서로 다른 역할입니다. UI만의 복합 진단은 별도 통지 서비스를 실행하지 않습니다.
 
 `미관측`은 정상 판정에서 제외됩니다. 새 테스트 스택에 장기 이력을 생성해 넣지 않습니다. 정책 임계값은 관측 대상·노이즈·요청량을 확인하고 운영 적용 전에 조정합니다. 다수 인스턴스의 상관관계는 원인 후보이며 인과 증명이 아닙니다.
 

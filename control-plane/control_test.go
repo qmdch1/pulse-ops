@@ -90,14 +90,14 @@ func TestJumpValidationAndDeletion(t *testing.T) {
 	}
 }
 func TestServiceAuthenticationAndBlankConnect(t *testing.T) {
-	s := newService(testStore(t), strings.Repeat("t", 32), []string{"http://localhost:13000"})
+	s := newService(testStore(t), []string{"http://localhost:13000"})
 	asset, e := s.store.Save(AssetInput{Asset: Asset{Kind: "server"}})
 	if e != nil {
 		t.Fatal(e)
 	}
-	server := httptest.NewServer(s.handler())
+	server := httptest.NewServer(s.webHandler("production", "operator", strings.Repeat("p", 24), ""))
 	defer server.Close()
-	response, e := http.Get(server.URL + "/assets")
+	response, e := http.Get(server.URL + "/api/control/assets")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -105,8 +105,10 @@ func TestServiceAuthenticationAndBlankConnect(t *testing.T) {
 	if response.StatusCode != 401 {
 		t.Fatal("missing auth allowed")
 	}
-	request, _ := http.NewRequest("POST", server.URL+"/assets/"+asset.ID+"/connect", nil)
-	request.Header.Set("Authorization", "Bearer "+s.token)
+	request, _ := http.NewRequest("POST", server.URL+"/api/control/assets/"+asset.ID+"/connect", nil)
+	request.SetBasicAuth("operator", strings.Repeat("p", 24))
+	request.Header.Set("Origin", "http://localhost:13000")
+	request.Host = "localhost:13000"
 	response, e = http.DefaultClient.Do(request)
 	if e != nil {
 		t.Fatal(e)
@@ -131,7 +133,7 @@ func TestHistogramAndWindow(t *testing.T) {
 	if _, ok = histogramQuantile(raw, previous, "h", .99); ok {
 		t.Fatal("counter reset accepted")
 	}
-	s := newService(testStore(t), strings.Repeat("t", 32), nil)
+	s := newService(testStore(t), nil)
 	s.history["x"] = []previousSample{{At: time.Now().Add(-time.Minute)}}
 	if !s.windowSample("x", 5*time.Minute).At.IsZero() {
 		t.Fatal("incomplete window accepted")
@@ -143,7 +145,7 @@ func TestCollectionDoesNotFollowHTTPRedirects(t *testing.T) {
 	defer other.Close()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, other.URL, 302) }))
 	defer server.Close()
-	s := newService(testStore(t), strings.Repeat("t", 32), nil)
+	s := newService(testStore(t), nil)
 	values, e := s.collectHTTP(context.Background(), StoredAsset{Asset: Asset{Address: server.URL, Kind: "http"}})
 	if e != nil {
 		t.Fatal(e)
@@ -187,7 +189,6 @@ func TestIntegrationRegisteredTargetsAndTerminal(t *testing.T) {
 	if base == "" {
 		t.Skip("isolated Compose integration only")
 	}
-	token := "pulse_isolated_test_service_token_32chars"
 	call := func(method, path string, body any, status int) []byte {
 		t.Helper()
 		var reader io.Reader
@@ -195,8 +196,9 @@ func TestIntegrationRegisteredTargetsAndTerminal(t *testing.T) {
 			b, _ := json.Marshal(body)
 			reader = bytes.NewReader(b)
 		}
-		r, _ := http.NewRequest(method, base+path, reader)
-		r.Header.Set("Authorization", "Bearer "+token)
+		r, _ := http.NewRequest(method, base+"/api/control"+path, reader)
+		r.Header.Set("Origin", "http://localhost:13000")
+		r.Host = "localhost:13000"
 		r.Header.Set("Content-Type", "application/json")
 		response, e := http.DefaultClient.Do(r)
 		if e != nil {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,22 +22,22 @@ type previousSample struct {
 	Values map[string]float64
 }
 type Service struct {
-	store    *Store
-	token    string
-	origins  map[string]bool
-	mu       sync.Mutex
-	tickets  map[string]terminalTicket
-	sessions int
-	busy     map[string]bool
-	previous map[string]previousSample
-	history  map[string][]previousSample
-	retry    map[string]time.Time
-	failures map[string]int
-	slots    chan struct{}
+	snapshots snapshotCache
+	store     *Store
+	origins   map[string]bool
+	mu        sync.Mutex
+	tickets   map[string]terminalTicket
+	sessions  int
+	busy      map[string]bool
+	previous  map[string]previousSample
+	history   map[string][]previousSample
+	retry     map[string]time.Time
+	failures  map[string]int
+	slots     chan struct{}
 }
 
-func newService(store *Store, token string, origins []string) *Service {
-	s := &Service{store: store, token: token, origins: map[string]bool{}, tickets: map[string]terminalTicket{}, busy: map[string]bool{}, previous: map[string]previousSample{}, history: map[string][]previousSample{}, retry: map[string]time.Time{}, failures: map[string]int{}, slots: make(chan struct{}, 4)}
+func newService(store *Store, origins []string) *Service {
+	s := &Service{store: store, origins: map[string]bool{}, tickets: map[string]terminalTicket{}, busy: map[string]bool{}, previous: map[string]previousSample{}, history: map[string][]previousSample{}, retry: map[string]time.Time{}, failures: map[string]int{}, slots: make(chan struct{}, 4)}
 	for _, origin := range origins {
 		if u, e := url.Parse(strings.TrimSpace(origin)); e == nil && u.Host != "" {
 			s.origins[u.Scheme+"://"+u.Host] = true
@@ -78,10 +77,7 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	}
 	return true
 }
-func (s *Service) handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
-	mux.HandleFunc("GET /terminal/ws", s.terminal)
+func (s *Service) apiHandler() http.Handler {
 	api := http.NewServeMux()
 	api.HandleFunc("GET /assets", func(w http.ResponseWriter, r *http.Request) {
 		assets, e := s.store.List()
@@ -275,14 +271,7 @@ func (s *Service) handler() http.Handler {
 		writeJSON(w, 200, map[string]any{"assets": assets, "observations": observations, "evaluation": evaluation, "end": end, "step": step, "connected": true})
 	})
 	api.HandleFunc("GET /audit", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, s.store.Audit()) })
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if len(s.token) < 32 || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {
-			fail(w, 401, "인증이 필요합니다")
-			return
-		}
-		api.ServeHTTP(w, r)
-	}))
-	return mux
+	return api
 }
 func (s *Store) Enable(id string, enabled bool) (Asset, error) {
 	s.mu.Lock()
@@ -345,16 +334,19 @@ func main() {
 	if dir == "" {
 		dir = "./data"
 	}
-	token := os.Getenv("CONTROL_API_TOKEN")
-	if len(token) < 32 {
-		log.Fatal("CONTROL_API_TOKEN must have at least 32 characters")
+	mode := os.Getenv("MONITORING_MODE")
+	if mode != "test" {
+		mode = "production"
+		if os.Getenv("CONTROL_MASTER_KEY") == "" || os.Getenv("DASHBOARD_USERNAME") == "" || len(os.Getenv("DASHBOARD_PASSWORD")) < 24 || os.Getenv("CONTROL_ALLOWED_ORIGINS") == "" {
+			log.Fatal("Production requires an encryption key, operator credentials and allowed origins")
+		}
 	}
 	store, e := openStore(dir)
 	if e != nil {
 		log.Fatal("Unable to open encrypted registry")
 	}
 	defer store.db.Close()
-	service := newService(store, token, strings.Split(os.Getenv("CONTROL_ALLOWED_ORIGINS"), ","))
+	service := newService(store, strings.Split(os.Getenv("CONTROL_ALLOWED_ORIGINS"), ","))
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if os.Getenv("CONTROL_TEST_SEED") == "true" {
@@ -370,15 +362,20 @@ func main() {
 	if address == "" {
 		address = "127.0.0.1:7080"
 	}
-	server := &http.Server{Addr: address, Handler: service.handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
+	server := &http.Server{Addr: address, Handler: service.webHandler(mode, os.Getenv("DASHBOARD_USERNAME"), os.Getenv("DASHBOARD_PASSWORD"), os.Getenv("SSH_INVENTORY_FILE")), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()
 		c, done := context.WithTimeout(context.Background(), 10*time.Second)
 		defer done()
 		_ = server.Shutdown(c)
 	}()
-	log.Printf("PULSE control service listening on %s", address)
-	if e = server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
+	log.Printf("PULSE / OPS listening on %s (%s)", address, mode)
+	if cert, key := os.Getenv("PULSE_TLS_CERT"), os.Getenv("PULSE_TLS_KEY"); cert != "" && key != "" {
+		e = server.ListenAndServeTLS(cert, key)
+	} else {
+		e = server.ListenAndServe()
+	}
+	if e != nil && e != http.ErrServerClosed {
 		log.Fatal(e)
 	}
 }

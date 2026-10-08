@@ -52,22 +52,26 @@ services:
     depends_on: [frontend]
     mem_limit: 64m
   postgres-exporter:
+    profiles: [observability]
     image: prometheuscommunity/postgres-exporter:v0.17.1
     environment:
       DATA_SOURCE_NAME: postgresql://pulse_test:pulse_test_only@postgres:5432/pulse_test?sslmode=disable
     depends_on: [postgres]
     mem_limit: 64m
   redis-exporter:
+    profiles: [observability]
     image: oliver006/redis_exporter:v1.73.0
     environment: {REDIS_ADDR: 'redis://redis:6379'}
     depends_on: [redis]
     mem_limit: 64m
   nginx-exporter:
+    profiles: [observability]
     image: nginx/nginx-prometheus-exporter:1.4.2
     command: ['--nginx.scrape-uri=http://frontend:8080/stub_status']
     depends_on: [frontend]
     mem_limit: 48m
   prometheus:
+    profiles: [observability]
     image: prom/prometheus:v3.4.1
     command: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=35d, --storage.tsdb.retention.size=1GB]
     volumes:
@@ -77,14 +81,17 @@ services:
     ports: ['127.0.0.1:19090:9090']
     mem_limit: 384m
   alertmanager:
+    profiles: [observability]
     image: prom/alertmanager:v0.28.1
     volumes: [./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro, test-alertmanager:/alertmanager]
     mem_limit: 64m
   blackbox:
+    profiles: [observability]
     image: prom/blackbox-exporter:v0.26.0
     volumes: [./monitoring/prometheus/blackbox.yml:/etc/blackbox_exporter/config.yml:ro]
     mem_limit: 64m
   grafana:
+    profiles: [observability]
     image: grafana/grafana:12.0.2
     environment:
       GF_SECURITY_ADMIN_USER: pulse
@@ -96,19 +103,6 @@ services:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
     mem_limit: 256m
-  dashboard:
-    build: .
-    profiles: [dashboard]
-    environment:
-      MONITORING_MODE: test
-      CONTROL_PLANE_URL: http://control-plane:7080
-      CONTROL_API_TOKEN: pulse_isolated_test_service_token_32chars
-      GRAFANA_PUBLIC_URL: http://localhost:13001
-      SSH_INVENTORY_FILE: /app/config/ssh-inventory.json
-    volumes: [./.local/ssh-inventory.json:/app/config/ssh-inventory.json:ro]
-
-    mem_limit: 384m
-    depends_on: [control-plane]
   control-plane:
     build:
       context: ./control-plane
@@ -117,18 +111,17 @@ services:
     environment:
       MONITORING_MODE: test
       CONTROL_TEST_SEED: 'true'
-      CONTROL_API_TOKEN: pulse_isolated_test_service_token_32chars
+      SSH_INVENTORY_FILE: /config/hosts.json
       CONTROL_ALLOWED_ORIGINS: http://localhost:13000,http://127.0.0.1:13000
-    volumes: [test-registry:/data, test-ssh:/test-ssh:ro]
+    ports: ['127.0.0.1:13000:7080']
+    volumes: [test-registry:/data, test-ssh:/test-ssh:ro, ./.local/ssh:/config:ro]
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, 'http://127.0.0.1:7080/api/health']
+      interval: 15s
+      timeout: 3s
+      retries: 3
     depends_on: [demo-api, postgres, redis, frontend, test-bastion, test-node]
     mem_limit: 256m
-  gateway:
-    image: nginx:1.28.0-alpine
-    profiles: [dashboard]
-    volumes: [./monitoring/gateway/default.conf:/etc/nginx/conf.d/default.conf:ro]
-    ports: ['127.0.0.1:13000:8080']
-    depends_on: [dashboard, control-plane]
-    mem_limit: 64m
   test-bastion:
     build: ./monitoring/test-ssh
     profiles: [dashboard]

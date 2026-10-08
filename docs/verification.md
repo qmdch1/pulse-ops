@@ -1,3 +1,5 @@
+> 이전 구현 단계의 검증 이력입니다. 현재 Go 단일 서비스의 검증은 [최신 기록](native-web-verification.md)을 확인하세요.
+
 # 검증 기록 · 2026-10-08
 
 - Docker 테스트: 애플리케이션 서버 3대, PostgreSQL, Redis, Nginx 프런트와 Prometheus·Grafana·Alertmanager를 실행했습니다.

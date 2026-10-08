@@ -138,7 +138,7 @@ func TestIntegrationDatabaseEngines(t *testing.T) {
 		t.Skip("isolated database Compose only")
 	}
 	store := testStore(t)
-	s := newService(store, "test", nil)
+	s := newService(store, nil)
 	pin, err := os.ReadFile("/test-ssh/bastion.fingerprint")
 	if err != nil {
 		t.Fatal(err)

@@ -1,0 +1,7 @@
+// Browser-native regression runner. No package manager, transpiler or Node.
+const cases=[];
+export function test(name,run){cases.push({name,run})}
+function fail(message){throw new Error(message||'Assertion failed')}
+function same(a,b){if(Object.is(a,b))return true;if(!a||!b||typeof a!=='object'||typeof b!=='object'||Array.isArray(a)!==Array.isArray(b))return false;const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(k=>Object.hasOwn(b,k)&&same(a[k],b[k]))}
+export const assert={ok:(v,m)=>{if(!v)fail(m)},equal:(a,b,m)=>{if(!Object.is(a,b))fail(m||`${String(a)} !== ${String(b)}`)},notEqual:(a,b,m)=>{if(Object.is(a,b))fail(m)},deepEqual:(a,b,m)=>{if(!same(a,b))fail(m||JSON.stringify({actual:a,expected:b}))},match:(a,re,m)=>{if(!re.test(a))fail(m||`${a} does not match ${re}`)},throws:(fn)=>{try{fn()}catch{return}fail('Expected exception')}};
+export async function run(){let failed=0;const list=document.querySelector('#results');for(const item of cases){const row=document.createElement('li');try{await item.run();row.textContent='PASS · '+item.name}catch(e){failed++;row.textContent='FAIL · '+item.name+' — '+e.message;row.className='failed'}list.append(row)}const summary=document.querySelector('#test-summary');summary.textContent=`${cases.length-failed} passed / ${failed} failed / ${cases.length} total`;summary.dataset.failed=String(failed);summary.dataset.total=String(cases.length);document.title=summary.textContent}
