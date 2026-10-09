@@ -94,7 +94,7 @@ curl http://127.0.0.1:18080/metrics
 
 예제는 단일 프로세스·비스트리밍 WSGI용입니다. Linux에서는 메모리 지표도 제공하며 CPU는 직전 수집 이후의 프로세스 CPU 시간으로 계산합니다. 실제 Flask·FastAPI·Django 등에는 공통 응답 완료 훅으로 집계 코드를 적용하고, 다중 워커는 [클라이언트의 다중 프로세스 설정](https://prometheus.github.io/client_python/multiprocess/)을 적용해야 전체 워커 값이 합쳐집니다.
 
-인프라 관리에서 **유형: 애플리케이션**, **서비스 URL: `https://app-a.internal`**, **애플리케이션 계측 URL: `https://app-a.internal/metrics`**를 저장하고 **연결 시작**을 누릅니다. 계측 URL을 비우면 서비스 URL의 경로 뒤에 `/metrics`를 붙입니다. 다른 인스턴스도 같은 방식으로 각각 등록합니다.
+인프라 관리에서 유형을 **애플리케이션**으로 선택하고, 서비스 URL에 `https://app-a.internal`, 애플리케이션 계측 URL에 `https://app-a.internal/metrics`를 입력해 저장한 뒤 **연결 시작**을 누릅니다. 계측 URL을 비우면 서비스 URL의 경로 뒤에 `/metrics`를 붙입니다. 다른 인스턴스도 같은 방식으로 각각 등록합니다.
 
 수집기가 접근할 수 있는 인스턴스별 주소를 사용합니다. 부하분산 URL 하나를 등록하면 매번 다른 서버의 누적값을 읽을 수 있어 서버별 관측이 깨집니다. 예제 기본 주소 `127.0.0.1`은 로컬 확인용이며, Docker 안에서 실행되는 Pulse Ops의 `localhost`는 그 컨테이너 자신입니다. 수집망에서 접근 가능한 주소·인터페이스로 연결하고, 운영 `/metrics`는 수집기만 접근하도록 제한합니다. HTTP 기본 인증은 등록 화면의 username/password를 사용합니다.
 
@@ -270,4 +270,4 @@ python scripts/verify-live.py
 
 테스트 Compose의 [브라우저 회귀 검사](http://localhost:13000/__tests__/)는 일반 브라우저에서 순수 JS 지표·규칙·차트 상태 검사를 실행합니다. 운영에는 이 경로가 없습니다. Go 통합 검사는 격리 Compose 내부에서만 실행합니다. `PULSE_TEST_CONTROL=http://127.0.0.1:7080`, `PULSE_TEST_DATABASES=true`, `PULSE_TEST_SSH_JUMP=true`로 실제 DB/SSH/PTY·키·jump·티켓·리사이즈와 PostgreSQL·Redis의 jump 경유 수집을 검증합니다. [최신 검증 기록](docs/native-web-verification.md)을 확인하세요.
 
-구조도는 `python3 scripts/render-architecture.py`로 다시 생성합니다. 이 스크립트는 표준 라이브러리만 사용하며 라이트·다크 SVG 두 개를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
+전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`로 다시 생성합니다. 두 스크립트는 표준 라이브러리만 사용하며 각각 라이트·다크 SVG를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
