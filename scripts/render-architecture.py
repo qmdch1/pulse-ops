@@ -29,7 +29,7 @@ THEMES = {
 PHASES = [  # (start, end, color, pill label, caption)
     (0.0, 4.4, 'violet', '① 화면 로드', 'Go가 실행 파일에 내장한 HTML·CSS·ES 모듈을 gzip·ETag로 내려 줍니다.'),
     (4.4, 11.6, 'blue', '② 화면 갱신', 'Worker가 /api/monitoring을 읽습니다. 3초 안의 같은 조회는 공유 캐시로 답하고 수집을 호출하지 않습니다.'),
-    (11.6, 18.8, 'green', '③ 15초 수집', '화면과 무관하게 15초마다 실행합니다. 슬롯 4개가 차면 다음 대상은 빈 슬롯을 기다리고, 결과는 SQLite에 저장합니다.'),
+    (11.6, 18.8, 'green', '③ 수집·알림', '15초 수집 결과를 저장한 뒤 이벤트를 판정합니다. 발생·복구를 암호화 대기열에서 웹훅·메신저로 전송합니다.'),
     (18.8, T, 'amber', '④ 터미널', '30초 단회 티켓으로 WebSocket을 연 뒤 Go가 SSH PTY를 중계합니다. 감사 기록에는 연결·종료만 남습니다.'),
 ]
 
@@ -193,8 +193,10 @@ def build(theme):
     block(s, TERM, '터미널 게이트웨이', '단회 티켓 30초 → WebSocket → SSH PTY')
     block(s, STATIC, '정적 파일', '실행 파일 내장 · gzip · ETag')
     block(s, API, '/api/monitoring', '3초 공유 캐시', mono=True)
-    block(s, SCHED, '수집 스케줄러', '등록 ID별 1개')
+    block(s, SCHED, '수집·이벤트', '등록 ID별 1개')
     s.text(s.base, SCHED[0] + 16, SCHED[1] + 60, '동시 최대 4', 11.5, 'muted')
+    s.text(s.base, SCHED[0] + 16, SCHED[1] + 78, '발생·복구 판정', 10.5, 'muted')
+    s.text(s.base, API[0] + 16, API[1] + 145, '/integrations/*', 9.5, 'muted', mono=True)
     for box, title, sub in ((SERVER, '서버', 'Linux · macOS · Windows'), (DB, '데이터베이스', 'PostgreSQL·MySQL·MariaDB·Oracle'),
                             (REDIS, 'Redis', 'PING · INFO'), (HTTP, 'HTTP 서비스', '응답 코드 · TLS 만료'),
                             (APP, '애플리케이션', '/metrics 카운터·히스토그램')):
@@ -208,7 +210,7 @@ def build(theme):
     s.base.append(f'<g fill="none" stroke="{c["muted"]}" stroke-width="1.4"><ellipse cx="{x + 32}" cy="{y + 22}" rx="13" ry="4.5"/>'
                   f'<path d="M{x + 19},{y + 22} v24 a13,4.5 0 0 0 26,0 v-24"/><path d="M{x + 19},{y + 34} a13,4.5 0 0 0 26,0"/></g>')
     s.text(s.base, x + 58, y + 24, 'SQLite 볼륨', 13, 'text', 700)
-    s.text(s.base, x + 58, y + 42, '등록 정보 AES-256-GCM 암호화', 11.5, 'muted')
+    s.text(s.base, x + 58, y + 42, '등록·연동·대기열 AES-256-GCM', 11, 'muted')
     s.text(s.base, x + 58, y + 58, '관측 15일 · 감사 90일 보존', 11.5, 'muted')
 
     # UI mini chart, xterm screen, static file icons, scheduler slots
@@ -254,6 +256,9 @@ def build(theme):
     s.text(s.base, 138, 347, 'postMessage', 10.5, 'muted', 500, mono=True)
     s.text(s.base, 522, 541, '관측값 읽기', 10.5, 'muted', 500, 'end')
     s.text(s.base, 709, 541, '결과 저장', 10.5, 'muted', 500)
+    s.rect(s.base, 820, 528, 340, 28, 7, 'panel', 'border')
+    s.text(s.base, 990, 547, '알림 → Webhook · Slack · Discord · Teams', 11, 'muted', 500, 'middle')
+    s.lane('notify', 'M772,607 H796 V542 H820')
     s.text(s.base, WORKER[0], WORKER[1] + 116, '화면이 숨겨지면 조회를 멈춥니다.', 11, 'faint')
 
     # ① page load --------------------------------------------------------------
@@ -331,6 +336,8 @@ def build(theme):
                     f'{shown((back + 0.9, p3[1]), fade=0.2)}</circle>')
         s.packet('commit', back + 0.95, back + 1.5, 'green', trail=False, r=4, arrive=(699, 572))
     s.glow_lane('commit', 'green', [(14.2, 17.3)])
+    s.glow_lane('notify', 'green', [(17.0, 18.4)])
+    s.packet('notify', 17.15, 18.15, 'green', trail=False, arrive=(820, 542))
     s.fx.append(f'<g opacity="0">{shown((12.0, 14.3), fade=0.18)}<circle cx="{QUEUE[0]}" cy="{QUEUE[1]}" r="5" fill="{c["green"]}"/>'
                 f'</g>')
     s.fx.append(f'<g opacity="0">{shown((12.0, 14.25), fade=0.18)}<text class="t" x="{QUEUE[0] - 12}" y="{QUEUE[1] + 4}" font-size="11" '
@@ -409,7 +416,8 @@ def build(theme):
 
     title = 'Pulse Ops 트래픽 흐름'
     desc = ('브라우저는 Go 서비스에서 정적 파일과 /api/monitoring 스냅샷을 받고, Go 스케줄러는 15초마다 최대 4개 슬롯으로 등록한 '
-            '서버·DB·Redis·HTTP·애플리케이션을 직접 수집해 SQLite에 저장하며, 터미널은 단회 티켓과 WebSocket을 거쳐 SSH PTY로 연결됩니다.')
+            '서버·DB·Redis·HTTP·애플리케이션을 직접 수집해 SQLite에 저장합니다. /api/control/integrations에서 설정한 웹훅·Slack·Discord·Teams에는 '
+            '서버에서 판정한 발생·복구 이벤트를 암호화 대기열로 전송하며, 터미널은 단회 티켓과 WebSocket을 거쳐 SSH PTY로 연결됩니다.')
     style = ('.t{font-family:Pretendard,"Pretendard Variable","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",'
              '"Segoe UI",system-ui,sans-serif}.m{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace}'
              'text{text-rendering:geometricPrecision}.rm{display:none}'

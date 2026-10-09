@@ -71,7 +71,8 @@ func openStore(dir string) (*Store, error) {
  CREATE INDEX IF NOT EXISTS observation_asset_time ON observations(asset_id,observed_at);
  CREATE INDEX IF NOT EXISTS observation_time ON observations(observed_at);
  CREATE TABLE IF NOT EXISTS audit (asset_id TEXT,action TEXT,status TEXT,at TEXT);
- CREATE INDEX IF NOT EXISTS audit_time ON audit(at);`)
+ CREATE INDEX IF NOT EXISTS audit_time ON audit(at);
+ CREATE TABLE IF NOT EXISTS integrations (id TEXT PRIMARY KEY,payload BLOB NOT NULL);`)
 	if e != nil {
 		db.Close()
 		return nil, e

@@ -1,0 +1,37 @@
+import {$,$$,esc,icon,dialog,request,fullTime} from './ui.js';
+
+export const integrationProviders={webhook:'일반 웹훅',slack:'Slack',discord:'Discord',teams:'Microsoft Teams'};
+const help={webhook:'JSON 이벤트를 HTTP POST로 전송합니다. 필요하면 Bearer 인증 토큰을 추가하세요.',slack:'Slack 앱의 Incoming Webhooks에서 발급한 채널 주소를 입력하세요.',discord:'Discord 채널 설정 → 연동 → 웹훅에서 복사한 주소를 입력하세요.',teams:'Teams Workflows의 웹훅 수신 템플릿 주소를 입력하세요. 요청자 유형은 Anyone을 사용하며 Adaptive Card를 전송합니다.'};
+const field=(name,label,placeholder='',required=false)=>`<label>${label}<input name="${name}" type="password" autocomplete="new-password" placeholder="${esc(placeholder)}" ${required?'required':''}></label>`;
+ const statusLabels={sent:'전송 성공',retrying:'재시도 대기',failed:'전송 실패'};
+export function integrationInput(form,item={}){
+ const data=new FormData(form),input={name:String(data.get('name')||'').trim(),provider:String(data.get('provider')),enabled:data.has('enabled'),recovery:data.has('recovery'),severities:data.getAll('severity'),version:item.version||0};
+ const url=String(data.get('url')||'').trim(),token=String(data.get('token')||'');
+ if(url||!item.hasUrl)input.url=url;
+ if(token||form.dataset.clearToken==='true')input.token=token;
+ return input;
+}
+export function openIntegration(item={},onSaved=()=>{},api=request){
+ const d=dialog(item.id?'알림 연동 수정':'알림 연동 추가','이벤트 발생 시 채널로 알림을 보냅니다. 주소와 인증값은 암호화해 저장합니다.',`<form class="integration-form"><div class="field-grid"><label>연동 이름<input name="name" value="${esc(item.name||'')}" placeholder="예: 운영 장애 알림" maxlength="120" required></label><label>전송 방식<select name="provider">${Object.entries(integrationProviders).map(([key,label])=>`<option value="${key}" ${key===(item.provider||'webhook')?'selected':''}>${label}</option>`).join('')}</select></label></div><p class="editor-help" data-provider-help></p>${field('url','웹훅 URL',item.hasUrl?'저장된 주소 유지 · 변경할 때만 입력':'https://…',!item.hasUrl)}${item.hasUrl?`<p class="modal-footnote">저장된 수신처: ${esc(item.host)} · 주소 전체는 다시 표시하지 않습니다.</p>`:''}<div data-token-field>${field('token','Bearer 인증 토큰 (선택)',item.hasToken?'저장된 토큰 유지 · 변경할 때만 입력':'인증이 필요한 수신처만 입력')}${item.hasToken?'<button type="button" class="plain-link" data-clear-token>저장된 토큰 삭제</button>':''}</div><fieldset><legend>전송할 이벤트</legend><label class="check-field"><input type="checkbox" name="severity" value="critical" ${(item.severities||['critical','warning']).includes('critical')?'checked':''}>긴급</label><label class="check-field"><input type="checkbox" name="severity" value="warning" ${(item.severities||['critical','warning']).includes('warning')?'checked':''}>주의</label></fieldset><label class="check-field"><input type="checkbox" name="recovery" ${item.recovery!==false?'checked':''}>복구 알림도 전송</label><label class="check-field"><input type="checkbox" name="enabled" ${item.enabled?'checked':''}>자동 알림 활성화</label><p class="modal-footnote">같은 이벤트는 발생·복구 전환마다 알림을 만들고, 실패 시 재시도합니다. 저장 후 테스트 전송으로 수신 채널을 확인하세요.</p><p role="alert" class="integration-error" hidden></p><div class="dialog-actions">${item.id?'<button type="button" class="plain-link" data-delete>연동 삭제</button>':''}<button type="button" class="filter-button" data-cancel>취소</button><button type="submit" class="primary-button">저장</button></div></form>`);
+ const form=$('form',d),error=$('[role=alert]',d);let busy=false,deleteArmed=false;
+ const updateProvider=()=>{const provider=form.elements.provider.value;$('[data-provider-help]',d).textContent=help[provider];$('[data-token-field]',d).hidden=provider!=='webhook';form.elements.token.disabled=provider!=='webhook'};
+ form.elements.provider.onchange=updateProvider;updateProvider();
+ $('[data-clear-token]',d)?.addEventListener('click',()=>{form.dataset.clearToken='true';form.elements.token.value='';$('[data-clear-token]',d).textContent='저장 시 토큰 삭제됨'});
+ $('[data-cancel]',d).onclick=()=>d.close();
+ const operation=async fn=>{if(busy)return;busy=true;error.hidden=true;$$('button',form).forEach(b=>b.disabled=true);try{await fn();d.close();onSaved()}catch(e){error.textContent=e.message;error.hidden=false}finally{busy=false;$$('button',form).forEach(b=>b.disabled=false)}};
+ form.onsubmit=e=>{e.preventDefault();const input=integrationInput(form,item);if(!input.severities.length){error.textContent='전송할 심각도를 선택하세요';error.hidden=false;return}if(input.provider!=='webhook'&&item.hasToken)input.token='';void operation(()=>api(item.id?`integrations/${item.id}`:'integrations',item.id?'PUT':'POST',input))};
+ $('[data-delete]',d)?.addEventListener('click',()=>{if(!deleteArmed){deleteArmed=true;$('[data-delete]',d).textContent='삭제 확인 · 다시 누르면 삭제';return}void operation(()=>api(`integrations/${item.id}`,'DELETE'))});
+ return d;
+}
+export async function mountIntegrations(root,api=request){
+ root.innerHTML=`<header class="integration-heading"><div><h2>이벤트 알림 연동</h2><p>웹훅 · Slack · Discord · Teams로 발생과 복구를 전송합니다.</p></div><button class="primary-button" data-integration-add>${icon('plus')} 연동 추가</button></header><p class="modal-footnote">화면을 닫아도 서버가 알림을 전송합니다. 전송 실패는 최대 5회 재시도하며 결과를 연결·수집 기록에 남깁니다.</p><p role="status" data-integration-notice></p><div data-integration-list><p class="muted-text">연동을 불러오고 있습니다…</p></div>`;
+ const notice=$('[data-integration-notice]',root),list=$('[data-integration-list]',root);
+ const reload=()=>{const current=root.isConnected?root:(root.id?document.getElementById(root.id):null);if(current)return mountIntegrations(current,api)};
+ $('[data-integration-add]',root).onclick=()=>openIntegration({},reload,api);
+ try{
+  const items=await api('integrations');if(!list.isConnected)return;
+  list.innerHTML=items.length?items.map(item=>`<article class="integration-row"><div class="integration-icon">${icon('event',22)}</div><div class="integration-info"><h3>${esc(item.name)} <span class="health-label ${item.enabled?'connected':'paused'}">${item.enabled?'활성':'비활성'}</span></h3><p>${esc(integrationProviders[item.provider])} · ${esc(item.host)}</p><small>${item.severities.map(s=>s==='critical'?'긴급':'주의').join(' · ')}${item.recovery?' · 복구':''}${item.pending?` · 대기 ${item.pending}건`:''}</small>${item.lastStatus?`<p class="integration-result ${item.lastStatus==='failed'?'integration-error':''}">${esc(statusLabels[item.lastStatus]||item.lastStatus)} · ${esc(fullTime(item.lastAt))}${item.lastError?`<br>${esc(item.lastError)}`:''}</p>`:''}</div><div class="row-actions"><button class="filter-button" data-integration-test="${esc(item.id)}">테스트 전송</button><button class="filter-button" data-integration-edit="${esc(item.id)}">수정</button></div></article>`).join(''):'<div class="integration-empty"><strong>등록된 알림 연동이 없습니다</strong><p>팀에서 사용하는 채널을 추가하고 테스트 알림을 보내보세요.</p><div class="integration-provider-list">'+Object.values(integrationProviders).map(p=>`<span>${p}</span>`).join('')+'</div></div>';
+  $$('[data-integration-edit]',root).forEach(button=>button.onclick=()=>openIntegration(items.find(i=>i.id===button.dataset.integrationEdit),reload,api));
+  $$('[data-integration-test]',root).forEach(button=>button.onclick=async()=>{button.disabled=true;button.textContent='전송 중…';notice.textContent='';try{const result=await api(`integrations/${button.dataset.integrationTest}/test`,'POST');notice.textContent=result.message}catch(e){notice.textContent=e.message}finally{if(button.isConnected){button.disabled=false;button.textContent='테스트 전송'}}});
+ }catch(e){if(list.isConnected){list.innerHTML='<button class="filter-button" data-retry>다시 불러오기</button>';notice.textContent=e.message;$('[data-retry]',root).onclick=reload}}
+}

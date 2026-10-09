@@ -1,0 +1,1543 @@
+[
+  {
+    "id": "collector",
+    "title": "수집기 연결 중단",
+    "metricIds": [],
+    "condition": "Go 인프라 관리 서비스에 연결할 수 없음",
+    "duration": "즉시",
+    "severity": "critical",
+    "kind": "collection",
+    "requiredIds": [],
+    "checks": [],
+    "serverSupported": false
+  },
+  {
+    "id": "connection",
+    "title": "등록 인프라 연결 실패",
+    "metricIds": [
+      "targets-down"
+    ],
+    "condition": "등록된 대상의 최근 연결 시도가 실패함",
+    "duration": "최근 실패 즉시 · 재시도 최대 5분",
+    "severity": "critical",
+    "kind": "collection",
+    "requiredIds": [
+      "targets-down"
+    ],
+    "checks": [],
+    "serverSupported": true
+  },
+  {
+    "id": "errors",
+    "title": "서버 오류율 증가",
+    "metricIds": [
+      "errors",
+      "p99",
+      "requests"
+    ],
+    "condition": "5xx 비율 > 2%",
+    "duration": "2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "errors"
+    ],
+    "checks": [
+      {
+        "metric": "errors",
+        "op": ">",
+        "value": 2,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "latency",
+    "title": "꼬리 응답 지연 지속",
+    "metricIds": [
+      "p99",
+      "cpu",
+      "pool-wait"
+    ],
+    "condition": "P99 > 500ms",
+    "duration": "2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "p99"
+    ],
+    "checks": [
+      {
+        "metric": "p99",
+        "op": ">",
+        "value": 500,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "pool",
+    "title": "DB 커넥션 풀 병목 후보",
+    "metricIds": [
+      "pool-active",
+      "pool-wait",
+      "db-latency"
+    ],
+    "condition": "풀 사용률 > 80% AND 연결 대기 > 100ms",
+    "duration": "각 2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "pool-active",
+      "pool-wait"
+    ],
+    "checks": [
+      {
+        "metric": "pool-active",
+        "op": ">",
+        "value": 80,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "pool-wait",
+        "op": ">",
+        "value": 100,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "io",
+    "title": "CPU 여유 상태의 지연 증가",
+    "metricIds": [
+      "p99",
+      "cpu",
+      "db-latency"
+    ],
+    "condition": "P99 > 500ms AND 현재 CPU < 35%",
+    "duration": "P99 2분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "p99",
+      "cpu"
+    ],
+    "checks": [
+      {
+        "metric": "p99",
+        "op": ">",
+        "value": 500,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "cpu",
+        "op": "<",
+        "value": 35,
+        "seconds": 0,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "fast-fail",
+    "title": "빠른 실패로 가려진 장애 후보",
+    "metricIds": [
+      "errors",
+      "p99",
+      "failed-latency"
+    ],
+    "condition": "5xx > 2% AND 현재 P99 < 200ms",
+    "duration": "오류율 2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "errors",
+      "p99"
+    ],
+    "checks": [
+      {
+        "metric": "errors",
+        "op": ">",
+        "value": 2,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "p99",
+        "op": "<",
+        "value": 200,
+        "seconds": 0,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "throttle",
+    "title": "CPU 제한과 꼬리 지연 동반",
+    "metricIds": [
+      "throttling",
+      "p99",
+      "cpu"
+    ],
+    "condition": "CPU 제한 비율 > 20% AND P99 > 500ms",
+    "duration": "각 2분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "throttling",
+      "p99"
+    ],
+    "checks": [
+      {
+        "metric": "throttling",
+        "op": ">",
+        "value": 20,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "p99",
+        "op": ">",
+        "value": 500,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "leak",
+    "title": "GC 이후 메모리 상승 추세",
+    "metricIds": [
+      "gc-floor",
+      "gc-pause",
+      "memory"
+    ],
+    "condition": "GC 후 메모리 선형 증가율 > 1MiB/분",
+    "duration": "30분 이상 · 10개 이상 표본",
+    "severity": "warning",
+    "kind": "predicted",
+    "requiredIds": [
+      "gc-floor"
+    ],
+    "checks": [
+      {
+        "metric": "gc-floor",
+        "op": "slope",
+        "value": 0.016666666666666666,
+        "seconds": 1800,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "disk-risk",
+    "title": "24시간 내 디스크 소진 가능",
+    "metricIds": [
+      "disk-forecast",
+      "disk-free",
+      "disk"
+    ],
+    "condition": "6시간 추세로 예측한 24시간 뒤 여유 공간 < 0",
+    "duration": "15분 지속 · 6시간 전 표본 필요",
+    "severity": "warning",
+    "kind": "predicted",
+    "requiredIds": [
+      "disk-forecast"
+    ],
+    "checks": [
+      {
+        "metric": "disk-forecast",
+        "op": "<",
+        "value": 0,
+        "seconds": 900,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "traffic-drop",
+    "title": "평소 대비 트래픽 감소",
+    "metricIds": [
+      "requests",
+      "requests-week",
+      "probe"
+    ],
+    "condition": "지난주 동일 시각 > 1req/s AND 현재 요청량 < 지난주의 50%",
+    "duration": "요청량 2분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "requests",
+      "requests-week"
+    ],
+    "checks": [
+      {
+        "metric": "requests-week",
+        "op": ">",
+        "value": 1,
+        "seconds": 0,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "requests",
+        "op": "<",
+        "value": 0,
+        "seconds": 120,
+        "other": "requests-week",
+        "factor": 0.5
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "traffic-spike",
+    "title": "평소 대비 트래픽 급증",
+    "metricIds": [
+      "requests",
+      "requests-week",
+      "retries"
+    ],
+    "condition": "지난주 동일 시각 > 1req/s AND 현재 요청량 > 지난주의 2배",
+    "duration": "요청량 2분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "requests",
+      "requests-week"
+    ],
+    "checks": [
+      {
+        "metric": "requests-week",
+        "op": ">",
+        "value": 1,
+        "seconds": 0,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "requests",
+        "op": ">",
+        "value": 0,
+        "seconds": 120,
+        "other": "requests-week",
+        "factor": 2
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "regression",
+    "title": "주간 성능 저하 후보",
+    "metricIds": [
+      "p99",
+      "p99-week",
+      "requests"
+    ],
+    "condition": "지난주 P99 > 0 AND 현재 P99 > 지난주의 1.5배",
+    "duration": "P99 2분 지속",
+    "severity": "warning",
+    "kind": "predicted",
+    "requiredIds": [
+      "p99",
+      "p99-week"
+    ],
+    "checks": [
+      {
+        "metric": "p99-week",
+        "op": ">",
+        "value": 0,
+        "seconds": 0,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "p99",
+        "op": ">",
+        "value": 0,
+        "seconds": 120,
+        "other": "p99-week",
+        "factor": 1.5
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "cpu-pressure",
+    "title": "CPU 포화와 응답 지연 동반",
+    "metricIds": [
+      "cpu",
+      "p99",
+      "requests",
+      "requests-week"
+    ],
+    "condition": "CPU > 85% AND P99 > 500ms",
+    "duration": "각 2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "cpu",
+      "p99"
+    ],
+    "checks": [
+      {
+        "metric": "cpu",
+        "op": ">",
+        "value": 85,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "p99",
+        "op": ">",
+        "value": 500,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "memory-step",
+    "title": "메모리 급상승 후보",
+    "metricIds": [
+      "memory",
+      "inflight",
+      "gc-floor"
+    ],
+    "condition": "현재 RSS > 앞 절반 평균 + 50MiB AND > 평균 × 1.5",
+    "duration": "5분 이상 · 10개 이상 표본",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "memory"
+    ],
+    "checks": [
+      {
+        "metric": "memory",
+        "op": "memory-step",
+        "value": 0,
+        "seconds": 300,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "queue-growth",
+    "title": "대기열 증가 지속",
+    "metricIds": [
+      "queue",
+      "queue-age",
+      "rejections"
+    ],
+    "condition": "큐 선형 증가율 > 0.1개/초 AND 큐 > 20개",
+    "duration": "추세 5분 이상 · 깊이 2분 지속",
+    "severity": "warning",
+    "kind": "predicted",
+    "requiredIds": [
+      "queue"
+    ],
+    "checks": [
+      {
+        "metric": "queue",
+        "op": "slope",
+        "value": 0.1,
+        "seconds": 300,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "queue",
+        "op": ">",
+        "value": 20,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "api-scope",
+    "title": "특정 API 또는 API 전반 지연",
+    "metricIds": [
+      "api-latency",
+      "db-latency",
+      "pool-wait"
+    ],
+    "condition": "관측 API 중 하나 이상 P99 > 500ms; 현재 느린 API 수로 범위 구분",
+    "duration": "2분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "api-latency"
+    ],
+    "checks": [
+      {
+        "metric": "api-latency",
+        "op": ">",
+        "value": 500,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "cascade",
+    "title": "서버 이탈과 처리 포화 동반",
+    "metricIds": [
+      "targets-down",
+      "saturation",
+      "pool-active"
+    ],
+    "condition": "수집 중단 대상 > 0 AND 처리 용량 사용률 > 80%",
+    "duration": "각 2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "targets-down",
+      "saturation"
+    ],
+    "checks": [
+      {
+        "metric": "targets-down",
+        "op": ">",
+        "value": 0,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "saturation",
+        "op": ">",
+        "value": 80,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "stampede",
+    "title": "캐시 저하와 DB 지연 동반",
+    "metricIds": [
+      "cache-hit",
+      "db-latency",
+      "redis-expired"
+    ],
+    "condition": "캐시 적중률 < 70% AND DB 지연 > 100ms",
+    "duration": "각 2분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "cache-hit",
+      "db-latency"
+    ],
+    "checks": [
+      {
+        "metric": "cache-hit",
+        "op": "<",
+        "value": 70,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "db-latency",
+        "op": ">",
+        "value": 100,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "retry-storm",
+    "title": "실패·재시도 증폭 후보",
+    "metricIds": [
+      "retries",
+      "errors",
+      "requests"
+    ],
+    "condition": "재시도 > 1회/초 AND 5xx 비율 > 2%",
+    "duration": "각 2분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "requiredIds": [
+      "retries",
+      "errors"
+    ],
+    "checks": [
+      {
+        "metric": "retries",
+        "op": ">",
+        "value": 1,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "errors",
+        "op": ">",
+        "value": 2,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "timeout",
+    "title": "계층 타임아웃 예산 역전",
+    "metricIds": [
+      "timeout-db",
+      "timeout-gateway",
+      "gateway-errors"
+    ],
+    "condition": "DB 타임아웃 ≥ 게이트웨이 타임아웃",
+    "duration": "현재 설정 비교",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "timeout-db",
+      "timeout-gateway"
+    ],
+    "checks": [
+      {
+        "metric": "timeout-db",
+        "op": ">=",
+        "value": 0,
+        "seconds": 0,
+        "other": "timeout-gateway",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "slo",
+    "title": "빠른 오류 예산 소진",
+    "metricIds": [
+      "slo-burn",
+      "slo-burn-hour",
+      "errors"
+    ],
+    "condition": "5분 AND 1시간 소진율 > 14.4배 · SLO 99.9% 기준",
+    "duration": "두 창 각 2분 지속",
+    "severity": "critical",
+    "kind": "predicted",
+    "requiredIds": [
+      "slo-burn",
+      "slo-burn-hour"
+    ],
+    "checks": [
+      {
+        "metric": "slo-burn",
+        "op": ">",
+        "value": 14.4,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "slo-burn-hour",
+        "op": ">",
+        "value": 14.4,
+        "seconds": 120,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "post-deploy",
+    "title": "배포 후 지연 회복 지연",
+    "metricIds": [
+      "deployment",
+      "p99",
+      "canary"
+    ],
+    "condition": "배포 후 30분 미만 AND P99 > 500ms",
+    "duration": "P99 10분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "requiredIds": [
+      "deployment",
+      "p99"
+    ],
+    "checks": [
+      {
+        "metric": "deployment",
+        "op": "<",
+        "value": 30,
+        "seconds": 0,
+        "other": "",
+        "factor": 1
+      },
+      {
+        "metric": "p99",
+        "op": ">",
+        "value": 500,
+        "seconds": 600,
+        "other": "",
+        "factor": 1
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "cookie-expiry",
+    "title": "인증 세션 만료 임박 또는 만료",
+    "metricIds": [
+      "cookie-expiry"
+    ],
+    "requiredIds": [
+      "cookie-expiry"
+    ],
+    "condition": "쿠키 만료까지 < 60 분",
+    "duration": "30초 지속",
+    "severity": "warning",
+    "kind": "expiring",
+    "checks": [
+      {
+        "metric": "cookie-expiry",
+        "op": "<",
+        "value": 60.0,
+        "seconds": 30
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "tls-expiry",
+    "title": "TLS 인증서 만료 임박",
+    "metricIds": [
+      "tls-expiry"
+    ],
+    "requiredIds": [
+      "tls-expiry"
+    ],
+    "condition": "TLS 인증서 만료까지 < 14 일",
+    "duration": "30초 지속",
+    "severity": "warning",
+    "kind": "expiring",
+    "checks": [
+      {
+        "metric": "tls-expiry",
+        "op": "<",
+        "value": 14.0,
+        "seconds": 30
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "token-expiry",
+    "title": "서비스 토큰 만료 임박",
+    "metricIds": [
+      "token-expiry"
+    ],
+    "requiredIds": [
+      "token-expiry"
+    ],
+    "condition": "서비스 토큰 만료까지 < 24 시간",
+    "duration": "30초 지속",
+    "severity": "warning",
+    "kind": "expiring",
+    "checks": [
+      {
+        "metric": "token-expiry",
+        "op": "<",
+        "value": 24.0,
+        "seconds": 30
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "cookie-secure",
+    "title": "Secure 쿠키 정책 미충족",
+    "metricIds": [
+      "cookie-secure"
+    ],
+    "requiredIds": [
+      "cookie-secure"
+    ],
+    "condition": "Secure 쿠키 정책 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "cookie-secure",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "cookie-http",
+    "title": "HttpOnly 쿠키 정책 미충족",
+    "metricIds": [
+      "cookie-http"
+    ],
+    "requiredIds": [
+      "cookie-http"
+    ],
+    "condition": "HttpOnly 쿠키 정책 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "cookie-http",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "cookie-samesite",
+    "title": "SameSite 쿠키 정책 미충족",
+    "metricIds": [
+      "cookie-samesite"
+    ],
+    "requiredIds": [
+      "cookie-samesite"
+    ],
+    "condition": "SameSite 쿠키 정책 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "cookie-samesite",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "loop-p99",
+    "title": "이벤트 루프 정체",
+    "metricIds": [
+      "loop-p99"
+    ],
+    "requiredIds": [
+      "loop-p99"
+    ],
+    "condition": "이벤트 루프 지연 P99 > 100 ms",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "loop-p99",
+        "op": ">",
+        "value": 100.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "queue",
+    "title": "작업 대기열 누적",
+    "metricIds": [
+      "queue"
+    ],
+    "requiredIds": [
+      "queue"
+    ],
+    "condition": "작업 큐 깊이 > 100 개",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "queue",
+        "op": ">",
+        "value": 100.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "queue-age",
+    "title": "작업 최대 대기 시간 초과",
+    "metricIds": [
+      "queue-age"
+    ],
+    "requiredIds": [
+      "queue-age"
+    ],
+    "condition": "가장 오래된 작업 대기 > 60 초",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "queue-age",
+        "op": ">",
+        "value": 60.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "disk",
+    "title": "디스크 용량 압박",
+    "metricIds": [
+      "disk"
+    ],
+    "requiredIds": [
+      "disk"
+    ],
+    "condition": "디스크 사용률 > 85 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "disk",
+        "op": ">",
+        "value": 85.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "inode",
+    "title": "inode 소진 위험",
+    "metricIds": [
+      "inode"
+    ],
+    "requiredIds": [
+      "inode"
+    ],
+    "condition": "파일 inode 사용률 > 90 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "inode",
+        "op": ">",
+        "value": 90.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "file-descriptors",
+    "title": "파일·소켓 한계 접근",
+    "metricIds": [
+      "file-descriptors"
+    ],
+    "requiredIds": [
+      "file-descriptors"
+    ],
+    "condition": "파일 디스크립터 사용률 > 80 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "file-descriptors",
+        "op": ">",
+        "value": 80.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-up",
+    "title": "DB 연결 실패",
+    "metricIds": [
+      "db-up",
+      "db-probe"
+    ],
+    "requiredIds": [
+      "db-up"
+    ],
+    "condition": "DB 연결 상태 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-up",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-probe",
+    "title": "DB 읽기 응답 지연",
+    "metricIds": [
+      "db-probe",
+      "db-active",
+      "db-connection-usage",
+      "db-lock-waiters"
+    ],
+    "requiredIds": [
+      "db-probe"
+    ],
+    "condition": "DB 읽기 응답 시간 > 200 ms",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-probe",
+        "op": ">",
+        "value": 200.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-connection-usage",
+    "title": "DB 연결·세션 한도 접근",
+    "metricIds": [
+      "db-connection-usage",
+      "db-connections",
+      "db-active",
+      "db-probe"
+    ],
+    "requiredIds": [
+      "db-connection-usage"
+    ],
+    "condition": "DB 연결·세션 한도 사용률 > 80 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-connection-usage",
+        "op": ">",
+        "value": 80.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-lock-waiters",
+    "title": "DB 잠금 대기 지속",
+    "metricIds": [
+      "db-lock-waiters",
+      "db-lock-waits",
+      "db-active",
+      "db-probe"
+    ],
+    "requiredIds": [
+      "db-lock-waiters"
+    ],
+    "condition": "DB 잠금 대기 > 0 개",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-lock-waiters",
+        "op": ">",
+        "value": 0.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-slow-queries",
+    "title": "느린 DB 명령 증가",
+    "metricIds": [
+      "db-slow-queries",
+      "db-statements",
+      "db-probe"
+    ],
+    "requiredIds": [
+      "db-slow-queries"
+    ],
+    "condition": "느린 DB 명령 > 1 회/s",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-slow-queries",
+        "op": ">",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-monitoring-ready",
+    "title": "DB 통계 일부 수집 실패",
+    "metricIds": [
+      "db-monitoring-ready",
+      "db-up",
+      "db-probe"
+    ],
+    "requiredIds": [
+      "db-monitoring-ready"
+    ],
+    "condition": "DB 통계 수집 상태 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "collection",
+    "checks": [
+      {
+        "metric": "db-monitoring-ready",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "redis-up",
+    "title": "Redis 연결 실패",
+    "metricIds": [
+      "redis-up"
+    ],
+    "requiredIds": [
+      "redis-up"
+    ],
+    "condition": "Redis 연결 상태 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "redis-up",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-replication",
+    "title": "DB 복제 지연",
+    "metricIds": [
+      "db-replication"
+    ],
+    "requiredIds": [
+      "db-replication"
+    ],
+    "condition": "복제 지연 > 30 초",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-replication",
+        "op": ">",
+        "value": 30.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-deadlocks",
+    "title": "DB 데드락 발생",
+    "metricIds": [
+      "db-deadlocks"
+    ],
+    "requiredIds": [
+      "db-deadlocks"
+    ],
+    "condition": "DB 데드락 > 0 회/s",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-deadlocks",
+        "op": ">",
+        "value": 0.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "db-rollback",
+    "title": "DB 트랜잭션 롤백 증가",
+    "metricIds": [
+      "db-rollback"
+    ],
+    "requiredIds": [
+      "db-rollback"
+    ],
+    "condition": "트랜잭션 롤백률 > 5 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "db-rollback",
+        "op": ">",
+        "value": 5.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "redis-memory",
+    "title": "Redis 메모리 한계 접근",
+    "metricIds": [
+      "redis-memory"
+    ],
+    "requiredIds": [
+      "redis-memory"
+    ],
+    "condition": "Redis 메모리 사용률 > 85 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "redis-memory",
+        "op": ">",
+        "value": 85.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "redis-evictions",
+    "title": "캐시 축출 증가",
+    "metricIds": [
+      "redis-evictions"
+    ],
+    "requiredIds": [
+      "redis-evictions"
+    ],
+    "condition": "캐시 키 축출 > 1 개/s",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "redis-evictions",
+        "op": ">",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "gc-pause",
+    "title": "GC 정지 시간 증가",
+    "metricIds": [
+      "gc-pause"
+    ],
+    "requiredIds": [
+      "gc-pause"
+    ],
+    "condition": "GC 일시정지 P99 > 100 ms",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "gc-pause",
+        "op": ">",
+        "value": 100.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "oom",
+    "title": "OOM 종료 컨테이너 관측",
+    "metricIds": [
+      "oom"
+    ],
+    "requiredIds": [
+      "oom"
+    ],
+    "condition": "OOM 종료 상태 > 0 개",
+    "duration": "1분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "oom",
+        "op": ">",
+        "value": 0.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "clock-health",
+    "title": "시간 동기화 중단",
+    "metricIds": [
+      "clock-health"
+    ],
+    "requiredIds": [
+      "clock-health"
+    ],
+    "condition": "시간 동기화 상태 < 1 0/1",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "clock-health",
+        "op": "<",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "restarts",
+    "title": "컨테이너 반복 재시작",
+    "metricIds": [
+      "restarts"
+    ],
+    "requiredIds": [
+      "restarts"
+    ],
+    "condition": "컨테이너 재시작 · 1시간 > 2 회",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "restarts",
+        "op": ">",
+        "value": 2.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "probe",
+    "title": "외부 HTTP Probe 실패",
+    "metricIds": [
+      "probe"
+    ],
+    "requiredIds": [
+      "probe"
+    ],
+    "condition": "HTTP 가용성 < 100 %",
+    "duration": "1분 지속",
+    "severity": "critical",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "probe",
+        "op": "<",
+        "value": 100.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "auth-errors",
+    "title": "인증 실패율 상승",
+    "metricIds": [
+      "auth-errors"
+    ],
+    "requiredIds": [
+      "auth-errors"
+    ],
+    "condition": "인증 실패율 > 5 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "auth-errors",
+        "op": ">",
+        "value": 5.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "clock-skew",
+    "title": "시스템 시계 편차",
+    "metricIds": [
+      "clock-skew"
+    ],
+    "requiredIds": [
+      "clock-skew"
+    ],
+    "condition": "시스템 시계 편차 > 1 초",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "clock-skew",
+        "op": ">",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "network-drop",
+    "title": "네트워크 패킷 드롭",
+    "metricIds": [
+      "network-drop"
+    ],
+    "requiredIds": [
+      "network-drop"
+    ],
+    "condition": "패킷 드롭 > 1 개/s",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "network-drop",
+        "op": ">",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "tcp-retry",
+    "title": "TCP 재전송 증가",
+    "metricIds": [
+      "tcp-retry"
+    ],
+    "requiredIds": [
+      "tcp-retry"
+    ],
+    "condition": "TCP 재전송률 > 1 %",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "detected",
+    "checks": [
+      {
+        "metric": "tcp-retry",
+        "op": ">",
+        "value": 1.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "targets-down",
+    "title": "지표 수집 대상 중단",
+    "metricIds": [
+      "targets-down"
+    ],
+    "requiredIds": [
+      "targets-down"
+    ],
+    "condition": "수집 중단 대상 > 0 개",
+    "duration": "1분 지속",
+    "severity": "critical",
+    "kind": "collection",
+    "checks": [
+      {
+        "metric": "targets-down",
+        "op": ">",
+        "value": 0.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  },
+  {
+    "id": "scrape-age",
+    "title": "수집 데이터 신선도 저하",
+    "metricIds": [
+      "scrape-age"
+    ],
+    "requiredIds": [
+      "scrape-age"
+    ],
+    "condition": "마지막 관측 경과 > 45 초",
+    "duration": "1분 지속",
+    "severity": "warning",
+    "kind": "collection",
+    "checks": [
+      {
+        "metric": "scrape-age",
+        "op": ">",
+        "value": 45.0,
+        "seconds": 60
+      }
+    ],
+    "serverSupported": true
+  }
+]

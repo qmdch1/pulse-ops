@@ -1,0 +1,18 @@
+[
+  {"name":"error equality","seconds":150,"values":{"errors":2},"want":[]},
+  {"name":"sustained errors","seconds":150,"values":{"errors":3},"want":["errors"]},
+  {"name":"pending duration","seconds":105,"values":{"errors":3},"want":[]},
+  {"name":"latency with spare CPU","seconds":150,"values":{"p99":600,"cpu":20},"want":["io","latency"]},
+  {"name":"CPU pressure","seconds":150,"values":{"p99":600,"cpu":90},"want":["cpu-pressure","latency"]},
+  {"name":"combined pool condition","seconds":150,"values":{"pool-active":90,"pool-wait":120},"want":["pool"]},
+  {"name":"pool partial evidence","seconds":150,"values":{"pool-active":90},"want":[]},
+  {"name":"DB rollback rate","seconds":75,"values":{"db-rollback":6},"want":["db-rollback"]},
+  {"name":"expiry equality","seconds":60,"values":{"tls-expiry":14},"want":[]},
+  {"name":"expiry short hold","seconds":45,"values":{"tls-expiry":13},"want":["tls-expiry"]},
+  {"name":"timeout equality","seconds":0,"values":{"timeout-db":5,"timeout-gateway":5},"want":["timeout"]},
+  {"name":"SLO both windows","seconds":150,"values":{"slo-burn":15,"slo-burn-hour":15},"want":["slo"]},
+  {"name":"request baseline","seconds":150,"values":{"requests":20,"requests-week":5},"want":["traffic-spike"]},
+  {"name":"latest missing","seconds":150,"values":{"errors":3},"nullLast":true,"want":[]},
+  {"name":"collection gap","seconds":150,"values":{"errors":3},"gap":true,"want":[]},
+  {"name":"stale evidence","seconds":150,"values":{"errors":3},"stale":true,"want":[]}
+]

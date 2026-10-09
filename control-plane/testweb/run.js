@@ -9,6 +9,7 @@ import './chart-scale.test.js';
 import './chart-interface.test.js';
 import './dashboard-controls.test.js';
 import './chart-family.test.js';
+import './integrations.test.js';
 import {esc} from '/assets/ui.js';
 import {scopeSnapshot} from '/assets/lib/assets.js';
 import {ruleState} from '/assets/lib/rule-catalog.js';
