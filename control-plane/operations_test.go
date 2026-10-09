@@ -345,6 +345,16 @@ func TestOperationsDiagnosticUsesActualHTTPAndDraftGuidance(t *testing.T) {
 	if record.Asset.Enabled || record.Asset.LastSeen != "" {
 		t.Fatal("diagnostic enabled collection")
 	}
+	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(401) }))
+	defer denied.Close()
+	a, e = store.Save(AssetInput{Asset: Asset{Name: "접근 거부", Kind: "http", Address: denied.URL}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	raw = opsCall(t, s, "POST", "/assets/"+a.ID+"/diagnose", nil, 200)
+	if !bytes.Contains(raw, []byte("HTTP 401")) || !bytes.Contains(raw, []byte("접근 권한")) {
+		t.Fatal("HTTP authentication denial was reported as healthy")
+	}
 	a, e = store.Save(AssetInput{Asset: Asset{Name: "초안", Kind: "server"}})
 	if e != nil {
 		t.Fatal(e)
