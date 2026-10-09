@@ -19,6 +19,87 @@
 
 HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사용합니다. 애플리케이션 자체에 별도 Nginx·Node 컨테이너는 필요하지 않습니다. Prometheus/Grafana는 선택적 분석 도구이며 인프라 등록이나 기본 동작의 필수 요소가 아닙니다.
 
+## 애플리케이션의 /metrics 구축
+
+**각 애플리케이션 인스턴스가 자신의 요청 집계값을 제공해야 합니다. API 목록을 Pulse Ops에 하나씩 등록할 필요는 없습니다.** 같은 앱을 여러 서버에서 실행하면 공통 미들웨어 코드를 한 번 추가해 배포하고, 각 서버의 `/metrics` 주소를 따로 등록합니다.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/application-metrics-flow-dark.svg">
+  <img alt="사용자 요청이 각 애플리케이션의 공통 미들웨어를 지나고, 실제 응답 코드와 시간을 Counter·Histogram에 집계합니다. 각 인스턴스의 /metrics를 Pulse Ops가 15초마다 읽어 연속 5분 증가량으로 오류율과 P99를 계산하며, 같은 그래프에 인스턴스별 선을 표시합니다. /health 응답과 전체 오류율은 별개입니다." src="docs/images/application-metrics-flow.svg" width="100%">
+</picture>
+
+애니메이션은 정상 요청 → 500 응답 집계 → 두 인스턴스의 `/metrics` 수집 → 지표 계산 순서입니다. 그림의 수치와 이동 속도는 설명용 예시이며, ‘동작 줄이기’ 설정에서는 정지된 구조를 표시합니다.
+
+### 1. 요청이 끝날 때 공통 처리부에서 집계
+
+언어별 [Prometheus 클라이언트 라이브러리](https://prometheus.io/docs/instrumenting/clientlibs/)를 사용합니다. 모든 업무 요청이 거치는 미들웨어·필터에 **최종 응답 코드별 Counter 증가**와 **응답시간 Histogram 기록**을 넣습니다. 정상 응답뿐 아니라 4xx, 예외가 변환된 5xx도 포함하고, 계측용 `/metrics`와 `/health`는 업무 요청 집계에서 제외합니다. 집계는 메모리에 유지하며 `/metrics`를 읽을 때마다 초기화하지 않습니다.
+
+| Pulse Ops가 읽는 이름 | 제공 형태 | 표시 지표 |
+| --- | --- | --- |
+| `http_requests_total{status="200"}` | Counter · 응답 코드별 누적 건수. `status="500"`, `"502"`, `"503"` 등도 같은 이름으로 제공 | 요청/초, 5xx·4xx 비율 |
+| `http_request_duration_seconds` | Histogram · 초 단위의 누적 `_bucket{le="…"}`, `_sum`, `_count` | P99 등 백분위, 평균 응답시간 |
+| `app_process_cpu_percent` | Gauge · 프로세스 CPU %. 코어 하나를 모두 사용하면 100 | CPU 사용률 |
+| `process_resident_memory_bytes` | Gauge · 실제 프로세스 상주 메모리의 바이트 수 | 메모리 MiB |
+| `app_active_requests` | Gauge · 현재 처리 중인 업무 요청 수, 선택 제공 | 인프라 상세의 동시 요청 |
+
+처음 두 지표만으로 요청량·오류율·P99를 표시할 수 있습니다. **현재 수집기는 위 이름과 `status` 라벨을 직접 읽습니다.** 프레임워크 기본 이름이나 `code` 라벨이 다르면 이 계약에 맞춰 내보내야 합니다. P99는 Summary의 사전 계산값 대신 Histogram 버킷으로 제공합니다. 측정하지 않은 지표는 가짜 0으로 채우지 않습니다.
+
+전체 오류율에는 `route`가 필요 없습니다. 경로별 집계를 추가한다면 `/users/123` 대신 `/users/{id}` 같은 라우트 템플릿을 쓰고 사용자 ID·쿼리·토큰을 라벨에 넣지 않습니다. 현재 Pulse Ops는 전체 요청 지표를 합산하며, 라우트별 오류율 상세 수집은 아직 구현되지 않았습니다.
+
+### 2. GET /metrics에서 누적값을 텍스트로 반환
+
+`HTTP 200`과 `Content-Type: text/plain; version=0.0.4; charset=utf-8`의 Prometheus 텍스트를 반환합니다. JSON이나 현재 오류율 숫자만 반환하면 이 수집기는 읽을 수 없습니다. 라이브러리의 출력 함수를 사용하면 타입·이스케이프·누적 버킷을 직접 만들 필요가 없습니다.
+
+<details>
+<summary>응답 예시 — 실제 누적값은 클라이언트 라이브러리가 생성합니다</summary>
+
+```text
+# HELP http_requests_total Completed business HTTP requests
+# TYPE http_requests_total counter
+http_requests_total{status="200"} 980
+http_requests_total{status="500"} 10
+http_requests_total{status="503"} 10
+# HELP http_request_duration_seconds Business HTTP response duration in seconds
+# TYPE http_request_duration_seconds histogram
+http_request_duration_seconds_bucket{le="0.1"} 900
+http_request_duration_seconds_bucket{le="0.5"} 980
+http_request_duration_seconds_bucket{le="1"} 995
+http_request_duration_seconds_bucket{le="+Inf"} 1000
+http_request_duration_seconds_sum 123
+http_request_duration_seconds_count 1000
+```
+
+Counter는 프로세스 시작 이후의 누적값입니다. Pulse Ops는 **최근 5분의 증가량**으로 `5xx 증가량 ÷ 전체 요청 증가량 × 100`을 계산합니다. 시작 후 연속 5분 표본이 쌓여야 하며, 요청이 없거나 카운터가 리셋된 구간은 오류율 0%로 추측하지 않습니다.
+
+</details>
+
+### 3. 실행 예제와 인프라 등록
+
+[Python 실행 예제](examples/metrics-app/app.py)는 공통 WSGI 미들웨어, 정상 API, 500 예외 처리, `/health`, `/metrics`를 포함합니다. 아래 명령은 Linux·macOS·WSL용이며 저장소 루트에서 실행합니다.
+
+```sh
+python3 -m venv .local/metrics-venv
+. .local/metrics-venv/bin/activate
+python -m pip install -r examples/metrics-app/requirements.txt
+python examples/metrics-app/app.py
+```
+
+다른 터미널에서 실제 요청과 응답을 확인합니다. `/api/fail`의 500은 실패 집계 검증용입니다.
+
+```sh
+curl -i http://127.0.0.1:18080/api/items
+curl -i http://127.0.0.1:18080/api/fail
+curl http://127.0.0.1:18080/metrics
+```
+
+예제는 단일 프로세스·비스트리밍 WSGI용입니다. Linux에서는 메모리 지표도 제공하며 CPU는 직전 수집 이후의 프로세스 CPU 시간으로 계산합니다. 실제 Flask·FastAPI·Django 등에는 공통 응답 완료 훅으로 집계 코드를 적용하고, 다중 워커는 [클라이언트의 다중 프로세스 설정](https://prometheus.github.io/client_python/multiprocess/)을 적용해야 전체 워커 값이 합쳐집니다.
+
+인프라 관리에서 유형을 **애플리케이션**으로 선택하고, 서비스 URL에 `https://app-a.internal`, 애플리케이션 계측 URL에 `https://app-a.internal/metrics`를 입력해 저장한 뒤 **연결 시작**을 누릅니다. 계측 URL을 비우면 서비스 URL의 경로 뒤에 `/metrics`를 붙입니다. 다른 인스턴스도 같은 방식으로 각각 등록합니다.
+
+수집기가 접근할 수 있는 인스턴스별 주소를 사용합니다. 부하분산 URL 하나를 등록하면 매번 다른 서버의 누적값을 읽을 수 있어 서버별 관측이 깨집니다. 예제 기본 주소 `127.0.0.1`은 로컬 확인용이며, Docker 안에서 실행되는 Pulse Ops의 `localhost`는 그 컨테이너 자신입니다. 수집망에서 접근 가능한 주소·인터페이스로 연결하고, 운영 `/metrics`는 수집기만 접근하도록 제한합니다. HTTP 기본 인증은 등록 화면의 username/password를 사용합니다.
+
+`/health`가 200이어도 업무 API가 500일 수 있습니다. SSH로 서버 자원만 수집하거나 `/health`만 조회하면 업무 요청의 오류율·P99는 알 수 없습니다. 요청 계측과 텍스트 출력은 [Prometheus 계측 지침](https://prometheus.io/docs/practices/instrumentation/)과 [Python 클라이언트 HTTP 문서](https://prometheus.github.io/client_python/exporting/http/)를 참고하세요.
+
 ## 화면과 그래프
 
 - **대시보드**: 선택한 인프라의 핵심 운영 지표만 보여줍니다. 현재 이벤트는 한 줄로 표시하며, 클릭하면 이벤트 화면에서 발생 근거와 관련 지표를 조사합니다.
@@ -33,7 +114,7 @@ HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사�
 | 인프라 | 대시보드 지표 |
 | --- | --- |
 | 애플리케이션 | 요청량, P99, 서버 오류율, CPU, 메모리 |
-| 서버 | CPU, 메모리, 디스크 사용률, 네트워크 수신·송신 |
+| 서버 | 호스트 CPU, 가장 바쁜 프로세스 CPU, RAM 사용률, 디스크 사용률·전체·사용·남은 용량, 네트워크 수신·송신 |
 | PostgreSQL | 응답시간, 트랜잭션 처리량, 연결 수, 잠금 수 |
 | MySQL·MariaDB·Oracle | 응답시간, 쿼리 처리량, 연결 사용률, 잠금 대기 |
 | Redis | 응답시간, 명령 처리량, 메모리 사용량, 적중률 |
@@ -49,7 +130,7 @@ HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사�
 
 화면 전환, 카드 표시와 상세 창에는 짧은 등장 애니메이션을 적용하고, 바뀐 숫자는 잠깐 강조합니다. 정기 갱신 때 전체 화면이 다시 등장하지는 않습니다. 운영체제의 ‘동작 줄이기’ 설정을 켜면 애니메이션을 생략합니다. 인프라 목록은 좁은 화면에서 관리 버튼까지 바로 보이도록 배치합니다.
 
-같은 값을 백분위·기간·방향·정책만 달리해 잰 지표는 작은 그래프 한 줄로 묶습니다. 인프라·이벤트 상세의 응답 시간 P50·P95·P97·P99·P99.9·평균, 성공·실패 요청 P99, 이벤트 루프 P99·최대, 오류 예산 5분·1시간, 쿠키 Secure·HttpOnly·SameSite와 대시보드의 서버 네트워크 수신·송신, DB 수신·송신이 대상이며 두 개 이상 관측될 때만 묶습니다. 한 줄은 같은 Y축을 써서 높이로 바로 비교되고, 인프라 색은 줄 전체에서 같습니다. 줄 위 범례로 한 인프라를 모든 카드에서 함께 숨기며, 카드 하나가 150px보다 좁아지면 3+3, 2+2+2처럼 고르게 나눕니다. 카드에서도 지표 이름은 상세를, 설정 버튼은 갱신·분리·합치기를 엽니다. 합치거나 분리한 그래프는 원래 크기로 표시되고, 해제하면 줄로 돌아옵니다.
+같은 값을 백분위·기간·방향·정책만 달리해 잰 지표는 작은 그래프 한 줄로 묶습니다. 인프라·이벤트 상세의 응답 시간 P50·P95·P97·P99·P99.9·평균, 성공·실패 요청 P99, 이벤트 루프 P99·최대, 오류 예산 5분·1시간, 쿠키 Secure·HttpOnly·SameSite와 대시보드의 서버 디스크 전체·사용·남은 용량, 네트워크 수신·송신, DB 수신·송신이 대상이며 두 개 이상 관측될 때만 묶습니다. 한 줄은 같은 Y축을 써서 높이로 바로 비교되고, 인프라 색은 줄 전체에서 같습니다. 줄 위 범례로 한 인프라를 모든 카드에서 함께 숨기며, 카드 하나가 150px보다 좁아지면 3+3, 2+2+2처럼 고르게 나눕니다. 카드에서도 지표 이름은 상세를, 설정 버튼은 갱신·분리·합치기를 엽니다. 합치거나 분리한 그래프는 원래 크기로 표시되고, 해제하면 줄로 돌아옵니다.
 
 화면 갱신은 실제 수집을 호출하지 않습니다. 1초로 설정해도 실제 수집은 15초 간격이며 API의 3초 공유 캐시를 재사용할 수 있습니다. 화면이 숨겨지면 조회를 중지합니다. 개별 갱신은 화면에 보이는 그래프를 기준으로 요청 주기를 조정합니다.
 
@@ -68,7 +149,7 @@ HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사�
 | 프로세스·Redis·스왑 메모리 / 네트워크 / DB 송수신 | 0~1GiB / 0~128MiB/s / 0~1MiB/s |
 | 호스트·DB 가동시간 / 쿠키·토큰·TLS 만료 | 0~1일 / 0~1시간·7일·90일 |
 
-119개 지표의 표시 기준은 `control-plane/web/data/metrics.json`의 `axisMax`에 명시합니다. 처리량·연결 수·큐 깊이 등 규모에 따라 달라지는 지표에도 초기 표시 범위를 두고 관측값에 맞춰 확장합니다. 이 기준은 제품의 그래프 표시 기본값이며 운영 SLO나 경보 임계값을 바꾸지 않습니다. Y축은 초·분·시간·일, GiB, MiB/s 등 읽기 쉬운 단위로 표시하며 범례·툴팁의 원래 값과 단위는 유지합니다.
+121개 지표의 표시 기준은 `control-plane/web/data/metrics.json`의 `axisMax`에 명시합니다. 처리량·연결 수·큐 깊이 등 규모에 따라 달라지는 지표에도 초기 표시 범위를 두고 관측값에 맞춰 확장합니다. 이 기준은 제품의 그래프 표시 기본값이며 운영 SLO나 경보 임계값을 바꾸지 않습니다. Y축은 초·분·시간·일, GiB, MiB/s 등 읽기 쉬운 단위로 표시하며 범례·툴팁의 원래 값과 단위는 유지합니다.
 
 ## 테스트 환경 실행
 
@@ -123,10 +204,10 @@ docker compose --env-file .env.prod -f compose.prod.yml up -d --build
 
 주소, username/password, PEM/OpenSSH 키, passphrase, SSH jump, 서버 지문과 의존 관계를 입력할 수 있습니다. 빈 값은 초안으로 저장되며 **저장과 실제 연결은 별도 동작**입니다. 저장된 비밀값은 응답에 포함되지 않고, 변경하지 않으면 유지되며 명시적으로 비울 때만 삭제됩니다.
 
-- 서버: SSH 고정 조회 명령으로 Linux `/proc`·`df`, macOS `top`·`vm_stat`, Windows PowerShell CIM을 읽습니다. 최대 8홉 jump와 고정 호스트 키 검증을 지원합니다.
+- 서버: SSH 고정 조회 명령으로 Linux `/proc`·`df`, macOS `top`·`vm_stat`, Windows PowerShell CIM을 읽습니다. 디스크 용량은 루트(/) 마운트(Windows는 시스템 드라이브) 기준입니다. 가장 바쁜 프로세스 CPU는 Linux에서 수집 주기 사이 `/proc/<pid>/stat` CPU 틱 변화량(한 코어=100%)으로, Windows에서 프로세스 성능 카운터로 계산하며 macOS는 아직 수집하지 않습니다. 첫 수집 뒤 다음 주기부터 표시됩니다. 최대 8홉 jump와 고정 호스트 키 검증을 지원합니다.
 - DB: PostgreSQL, MySQL, MariaDB, Oracle의 읽기 전용 모니터링 경로와 `SELECT 1` 왕복, DB별 통계를 지원합니다. Oracle은 Service name/SID를 구분합니다. 실제 업무 테이블은 조회하지 않습니다.
 - 캐시·서비스: Redis PING/INFO, HTTP 응답·TLS 만료, 애플리케이션 `/metrics`의 카운터·히스토그램을 직접 수집합니다.
-- 지표 119개·규칙 58개: [참고 글과 기능 대응표](docs/coverage.md). 앱 내부 GC·세션·쿠키 만료·Kubernetes/JVM·주간 기준선 등에는 별도 계측과 충분한 이력이 필요합니다. 주소만으로 추측하지 않습니다.
+- 지표 121개·규칙 58개: [참고 글과 기능 대응표](docs/coverage.md). 앱 내부 GC·세션·쿠키 만료·Kubernetes/JVM·주간 기준선 등에는 별도 계측과 충분한 이력이 필요합니다. 주소만으로 추측하지 않습니다.
 
 이벤트는 같은 등록 ID의 측정값으로 독립 평가합니다. 연결 관계는 관련 그래프를 추가하며 다른 서버의 값을 판정에 대신 사용하지 않습니다. 서버도 수집 결과로 이벤트를 평가해 활성 연동으로 발생·복구를 전송합니다. 전송 상태와 대기열은 재시작 후 유지하며, 연결·수집·터미널 감사 기록과 장기 사건 이력은 구분합니다.
 
@@ -208,4 +289,4 @@ python scripts/verify-live.py
 
 테스트 Compose의 [브라우저 회귀 검사](http://localhost:13000/__tests__/)는 일반 브라우저에서 순수 JS 지표·규칙·차트 상태 검사를 실행합니다. 운영에는 이 경로가 없습니다. Go 통합 검사는 격리 Compose 내부에서만 실행합니다. `PULSE_TEST_CONTROL=http://127.0.0.1:7080`, `PULSE_TEST_DATABASES=true`, `PULSE_TEST_SSH_JUMP=true`로 실제 DB/SSH/PTY·키·jump·티켓·리사이즈와 PostgreSQL·Redis의 jump 경유 수집을 검증합니다. [최신 검증 기록](docs/native-web-verification.md)을 확인하세요.
 
-구조도는 `python3 scripts/render-architecture.py`로 다시 생성합니다. 이 스크립트는 표준 라이브러리만 사용하며 라이트·다크 SVG 두 개를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
+전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`로 다시 생성합니다. 두 스크립트는 표준 라이브러리만 사용하며 각각 라이트·다크 SVG를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
