@@ -187,6 +187,59 @@ func TestParseDiskCapacity(t *testing.T) {
 		t.Fatal("df header parsed as a sample")
 	}
 }
+func TestContainerShareUsesCgroupAllocation(t *testing.T) {
+	const totalKB = 16 * 1024 * 1024 // 16 GiB VM
+	previous := previousSample{At: time.Now().Add(-10 * time.Second), Values: map[string]float64{"cgroup_cpu_usec": 1_000_000}}
+	near := func(a, b float64) bool { return a > b-0.01 && a < b+0.01 }
+	// cgroup v2 container: 64 MiB and half a core. 1 s of CPU in 10 s is 0.1 core = 20 % of 0.5.
+	raw := map[string]float64{}
+	own, ok := containerShare(map[string][]string{"mem.max": {"67108864"}, "mem.current": {"12582912"}, "mem.inactive": {"2097152"}, "session.anon_kb": {"2048"}, "cpu.max": {"50000", "100000"}, "cpuset": {"0-11"}, "cpu.usage_usec": {"2000000"}, "container": {"1"}, "nproc": {"12"}}, raw, previous, totalKB)
+	if !ok || !near(own["memory-host"], 12.5) || own["memory-limit"] != 64 || own["cpu-cores"] != 0.5 || !near(own["node-cpu"], 20) {
+		t.Fatalf("v2 limited container %v %v", own, ok)
+	}
+	// No limits: RAM is measured against the VM and CPU against every allowed core.
+	own, ok = containerShare(map[string][]string{"mem.max": {"max"}, "mem.current": {"1073741824"}, "cpu.max": {"max", "100000"}, "cpuset": {"0-3,6"}, "cpu.usage_usec": {"6000000"}, "container": {"1"}}, map[string]float64{}, previous, totalKB)
+	if !ok || !near(own["memory-host"], 6.25) || own["memory-limit"] != 16384 || own["cpu-cores"] != 5 || !near(own["node-cpu"], 10) {
+		t.Fatalf("unlimited container %v %v", own, ok)
+	}
+	// cgroup v1: the quota caps the usable cores and cpuacct counts nanoseconds.
+	own, ok = containerShare(map[string][]string{"v1.mem.limit": {"134217728"}, "mem.current": {"67108864"}, "mem.inactive": {"0"}, "v1.cpu.quota": {"200000"}, "v1.cpu.period": {"100000"}, "v1.cpu.usage": {"3000000000"}, "nproc": {"4"}}, map[string]float64{}, previous, totalKB)
+	if !ok || own["memory-host"] != 50 || own["memory-limit"] != 128 || own["cpu-cores"] != 2 || !near(own["node-cpu"], 10) {
+		t.Fatalf("v1 container %v %v", own, ok)
+	}
+	// A real host (v2 root without limit files, or v1 with the unlimited sentinel) keeps /proc values.
+	for _, host := range []map[string][]string{{"cpuset": {"0-11"}, "cpu.usage_usec": {"9"}, "nproc": {"12"}}, {"v1.mem.limit": {"9223372036854771712"}, "v1.cpu.quota": {"-1"}, "nproc": {"8"}}} {
+		if _, ok := containerShare(host, map[string]float64{}, previous, totalKB); ok {
+			t.Fatalf("host treated as a container: %v", host)
+		}
+	}
+	for set, want := range map[string]float64{"0-11": 12, "0-3,6": 5, "": 0, "7": 1} {
+		if got := cpusetCount(set); got != want {
+			t.Fatalf("cpuset %q = %v", set, got)
+		}
+	}
+}
+func TestDockerHostGroupsContainersOfOneKernel(t *testing.T) {
+	if dockerHostID("4f0c1a2b-9d8e-4c7f-a1b2-c3d4e5f60718") != "dockerhost-4f0c1a2b9d8e" || dockerHostID("not-a-boot-id") != "" || dockerHostID("") != "" {
+		t.Fatal("host id must come from a hex boot id only")
+	}
+	s := newService(testStore(t), nil)
+	boot := "4f0c1a2b-9d8e-4c7f-a1b2-c3d4e5f60718"
+	s.observeHost("node", boot, map[string]float64{"node-cpu": 3, "disk-used": 20})
+	s.observeHost("bastion", boot, map[string]float64{"node-cpu": 3, "disk-used": 20})
+	s.observeHost("deleted", boot, map[string]float64{"node-cpu": 3})
+	observations, err := s.store.Observations([]string{"dockerhost-4f0c1a2b9d8e"}, 0, 15)
+	if err != nil || len(observations) != 1 || observations[0].Values["disk-used"] != 20 {
+		t.Fatalf("host values must be stored once per interval: %v %v", observations, err)
+	}
+	hosts := s.dockerHosts([]Asset{{ID: "bastion", Name: "bastion", Enabled: true, Status: "connected", LastSeen: "2026-10-09T08:00:00Z"}, {ID: "node", Name: "node", Enabled: true, Status: "paused", LastSeen: "2026-10-09T08:00:15Z"}})
+	if len(hosts) != 1 || !hosts[0].Virtual || hosts[0].Kind != "server" || hosts[0].Status != "connected" || hosts[0].LastSeen != "2026-10-09T08:00:15Z" || strings.Join(hosts[0].Members, ",") != "bastion,node" {
+		t.Fatalf("virtual host %+v", hosts)
+	}
+	if len(s.dockerHosts(nil)) != 0 {
+		t.Fatal("a host without registered containers must not appear")
+	}
+}
 func TestCollectionDoesNotFollowHTTPRedirects(t *testing.T) {
 	hit := false
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))

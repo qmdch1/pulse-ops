@@ -42,6 +42,9 @@ type Asset struct {
 	Status            string    `json:"status"`
 	LastSeen          string    `json:"lastSeen"`
 	Message           string    `json:"message"`
+	// A Docker host derived from its containers; not part of the registry.
+	Virtual bool     `json:"virtual,omitempty"`
+	Members []string `json:"members,omitempty"`
 }
 type Secrets struct {
 	Password    string `json:"password"`

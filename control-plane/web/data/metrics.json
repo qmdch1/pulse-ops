@@ -178,10 +178,11 @@
     "unit": "%",
     "axisMax": 100,
     "query": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\",__SCOPE__}[5m])))",
-    "description": "호스트 CPU 전체 평균입니다. 프로세스 CPU·지연과 교차 확인합니다.",
+    "description": "CPU 전체 사용률입니다. 컨테이너는 할당된 CPU(쿼터, 없으면 쓸 수 있는 코어) 대비 자기 사용량이며, Docker VM 전체 값은 Docker 호스트로 따로 표시합니다.",
     "source": "Node exporter",
     "warning": 85,
-    "direction": "above"
+    "direction": "above",
+    "allocationMetric": "cpu-cores"
   },
   {
     "group": "resources",
@@ -212,9 +213,32 @@
     "unit": "%",
     "axisMax": 100,
     "query": "max(100 * (1-node_memory_MemAvailable_bytes{__SCOPE__}/node_memory_MemTotal_bytes{__SCOPE__}))",
-    "description": "물리 메모리(RAM) 중 사용 중인 비율입니다. 캐시를 포함한 free 대신 available을 사용합니다.",
+    "description": "물리 메모리(RAM) 중 사용 중인 비율입니다. 캐시를 포함한 free 대신 available을 사용합니다. 컨테이너는 할당된 메모리 한도 대비 자기 사용량(회수 가능한 캐시 제외)이며, Docker VM 전체 값은 Docker 호스트로 따로 표시합니다.",
     "source": "Node exporter",
     "warning": 90,
+    "direction": "above",
+    "allocationMetric": "memory-limit"
+  },
+  {
+    "group": "resources",
+    "id": "cpu-cores",
+    "title": "CPU 코어",
+    "unit": "코어",
+    "axisMax": 16,
+    "query": "count(node_cpu_seconds_total{mode=\"idle\",__SCOPE__})",
+    "description": "쓸 수 있는 CPU 코어 수입니다. 컨테이너는 할당된 CPU(쿼터가 없으면 사용 가능한 코어)입니다.",
+    "source": "직접 수집",
+    "direction": "above"
+  },
+  {
+    "group": "resources",
+    "id": "memory-limit",
+    "title": "RAM 용량",
+    "unit": "MiB",
+    "axisMax": 1024,
+    "query": "max(node_memory_MemTotal_bytes{__SCOPE__}) / 1024^2",
+    "description": "서버의 전체 RAM입니다. 컨테이너는 할당된 메모리 한도(없으면 Docker VM 전체)입니다.",
+    "source": "직접 수집",
     "direction": "above"
   },
   {

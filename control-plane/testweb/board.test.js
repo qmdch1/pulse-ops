@@ -1,6 +1,7 @@
 import {test} from './harness.js';
 import {assert} from './harness.js';
-import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricFamilies, metricRecipes, metricsForAsset, observedForAsset, relatedAssets, unselectedServers } from '/assets/lib/board.js';
+import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricFamilies, metricRecipes, metricsForAsset, observedForAsset, relatedAssets, unselectedServers, withDockerHosts } from '/assets/lib/board.js';
+import { humanize } from '/assets/lib/chart-scale.js';
 import { buildAction } from '/assets/lib/deploy.js';
 import { metrics, metricById } from '/assets/lib/catalog.js';
 import { recipeKey } from '/assets/lib/chart-layout.js';
@@ -247,4 +248,19 @@ test('an open page reloads after a UI redeploy but waits while the operator is b
     assert.equal(buildAction('aaaa', 'bbbb', false), 'reload');
     assert.equal(buildAction('aaaa', 'bbbb', true), 'wait');
     assert.equal(buildAction('aaaa', undefined, false), 'none');
+});
+test('a Docker host follows its containers and reports VM-wide values once', () => {
+    const host = { ...asset('dockerhost-4f0c1a2b9d8e', 'server'), name: 'Docker 호스트', virtual: true, members: ['node', 'bastion'] };
+    const assets = [asset('node', 'server'), asset('bastion', 'server'), asset('api-a'), host];
+    assert.deepEqual(withDockerHosts(assets, ['bastion', 'api-a']), ['bastion', 'api-a', 'dockerhost-4f0c1a2b9d8e']);
+    assert.deepEqual(withDockerHosts(assets, ['api-a']), ['api-a']);
+    assert.deepEqual(unselectedServers(assets, ['api-a']).map(a => a.id), ['node', 'bastion']);
+    const s = snapshot([metric('node-cpu', { node: 0.2, 'dockerhost-4f0c1a2b9d8e': 3 }), metric('memory-host', { node: 8, 'dockerhost-4f0c1a2b9d8e': 13 }), metric('disk-used', { 'dockerhost-4f0c1a2b9d8e': 23 }), metric('cpu-cores', { node: 0.5, 'dockerhost-4f0c1a2b9d8e': 12 }), metric('memory-limit', { node: 64, 'dockerhost-4f0c1a2b9d8e': 15857 })]);
+    s.assets = assets;
+    const shown = withDockerHosts(s.assets, ['node']);
+    const recipes = dashboardRecipes(s, shown);
+    assert.deepEqual(recipes.map(r => [r.family?.label, r.assetIds]), [['CPU', ['node', 'dockerhost-4f0c1a2b9d8e']], ['RAM', ['node', 'dockerhost-4f0c1a2b9d8e']], ['디스크', ['dockerhost-4f0c1a2b9d8e']]]);
+    assert.deepEqual(comparisonLines(s, shown, ['memory-host']).map(l => [l.assetId, l.allocation, l.allocationUnit]), [['node', 64, 'MiB'], ['dockerhost-4f0c1a2b9d8e', 15857, 'MiB']]);
+    assert.equal(comparisonLines(s, shown, ['disk-used'])[0].allocation, undefined);
+    assert.deepEqual([humanize(64, 'MiB'), humanize(15857, 'MiB'), humanize(0.5, '코어'), humanize(12, '코어')], ['64 MiB', '15.5 GiB', '0.5 코어', '12 코어']);
 });

@@ -182,6 +182,13 @@ func (s *Service) monitoring(w http.ResponseWriter, r *http.Request, mode string
 			targets = append(targets, target{a.ID, a.Kind, health, a.LastSeen, a.Message})
 		}
 	}
+	for _, host := range s.dockerHosts(assets) {
+		assets = append(assets, host)
+		if selected == "all" || selected == host.ID {
+			scoped = append(scoped, host)
+			ids = append(ids, host.ID)
+		}
+	}
 	if selected != "all" && len(scoped) == 0 {
 		fail(w, 404, "등록되지 않은 인프라입니다")
 		return

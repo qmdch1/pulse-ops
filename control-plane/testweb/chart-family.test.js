@@ -41,14 +41,14 @@ test('a single infrastructure shows each family value as a headline with its uni
 
 test('a resource card merged out of the top row leaves full-size charts and undo restores the row',async()=>{
  const server={id:'res-a',name:'Server A',kind:'server',dependencies:[],enabled:true,status:'connected'};
- const s={assets:[server],mode:'test',connected:true,collectedAt:'',start:9700,end:10000,step:15,targets:[],alerts:[],metrics:[['node-cpu',12],['memory-host',37],['disk-used',50],['disk-total',1006.85]].map(([id,v])=>({id,state:'ok',latest:null,series:[{labels:{assetId:'res-a',name:'Server A'},points:Array.from({length:21},(_,i)=>({time:9700+i*15,value:v}))}]}))};
+ const s={assets:[server],mode:'test',connected:true,collectedAt:'',start:9700,end:10000,step:15,targets:[],alerts:[],metrics:[['node-cpu',12],['memory-host',37],['disk-used',50],['disk-total',1006.85],['cpu-cores',4],['memory-limit',1024]].map(([id,v])=>({id,state:'ok',latest:null,series:[{labels:{assetId:'res-a',name:'Server A'},points:Array.from({length:21},(_,i)=>({time:9700+i*15,value:v}))}]}))};
  const root=document.createElement('div');root.className='board-chart-grid';root.style.width='1100px';document.body.append(root);
  const grid=new ChartGrid(root,dashboardRecipes(s,['res-a']),s,()=>{});
  try{await frames();
   const row=()=>root.querySelector(':scope>.chart-family');
   assert.deepEqual([...row().querySelectorAll('.chart-title')].map(b=>b.textContent),['CPU','RAM','디스크']);
   assert.equal(row().querySelector('header p').textContent,'CPU · RAM 같은 축 0–100 % · 디스크 0–1,006.85 GiB');
-  assert.equal([...row().querySelectorAll('.chart-latest strong')].map(n=>n.textContent).join(' | '),'12% | 37% | 50/ 1,006.9 GiB');
+  assert.equal([...row().querySelectorAll('.chart-latest strong')].map(n=>n.textContent).join(' | '),'12% · 4 코어 기준 | 37% · 1 GiB 기준 | 50/ 1,006.9 GiB');
   const rowCharts=grid.charts.filter(c=>c.row);assert.equal(rowCharts[0].row.scale('%').high,100);assert.equal(rowCharts[0].row.scale('GiB').high,1006.85);
   const cpu=[...row().querySelectorAll('.board-chart')][0];cpu.querySelector('.chart-grip').click();
   [...cpu.querySelectorAll('.chart-target')].find(b=>b.textContent==='RAM 사용률').click();await frames();

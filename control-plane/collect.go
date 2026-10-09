@@ -165,7 +165,7 @@ func ratio(values map[string]float64, id string, numerator, denominator float64)
 }
 func parseNumber(s string) float64 { v, _ := strconv.ParseFloat(strings.TrimSpace(s), 64); return v }
 
-const linuxMetrics = `set -e; LC_ALL=C; echo '__CPU__'; head -n 1 /proc/stat; echo '__MEM__'; cat /proc/meminfo; echo '__LOAD__'; cat /proc/loadavg; echo '__DISK__'; df -Pk /; echo '__NET__'; cat /proc/net/dev; echo '__UPTIME__'; cat /proc/uptime`
+const linuxMetrics = `LC_ALL=C; m=; i=; for f in /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory/memory.usage_in_bytes; do [ -z "$m" ] && [ -r "$f" ] && read -r m < "$f"; done; for f in /sys/fs/cgroup/memory.stat /sys/fs/cgroup/memory/memory.stat; do [ -z "$i" ] && [ -r "$f" ] && while read -r k v; do case $k in inactive_file|total_inactive_file) i=$v;; esac; done < "$f"; done; p=$$; a=0; while [ "$p" -gt 1 ] 2>/dev/null && [ -r /proc/$p/status ]; do n=0; while read -r k v rest; do case $k in RssAnon:|VmPTE:) a=$((a+v));; PPid:) n=$v;; esac; done < /proc/$p/status; p=$n; done; set -e; echo '__CPU__'; head -n 1 /proc/stat; echo '__MEM__'; cat /proc/meminfo; echo '__LOAD__'; cat /proc/loadavg; echo '__DISK__'; df -Pk /; echo '__NET__'; cat /proc/net/dev; echo '__UPTIME__'; cat /proc/uptime; echo '__NCPU__'; grep -c '^cpu[0-9]' /proc/stat; echo '__BOOT__'; cat /proc/sys/kernel/random/boot_id; echo '__CGROUP__'; set +e; r() { [ -r "$2" ] && echo "$1 $(head -n 1 "$2")"; }; r mem.max /sys/fs/cgroup/memory.max; r cpu.max /sys/fs/cgroup/cpu.max; r cpuset /sys/fs/cgroup/cpuset.cpus.effective; r v1.mem.limit /sys/fs/cgroup/memory/memory.limit_in_bytes; r v1.cpu.quota /sys/fs/cgroup/cpu/cpu.cfs_quota_us; r v1.cpu.period /sys/fs/cgroup/cpu/cpu.cfs_period_us; r v1.cpu.usage /sys/fs/cgroup/cpuacct/cpuacct.usage; awk '$1=="usage_usec"{print "cpu.usage_usec",$2}' /sys/fs/cgroup/cpu.stat 2>/dev/null; [ -n "$m" ] && echo mem.current $m; [ -n "$i" ] && echo mem.inactive $i; if [ -f /.dockerenv ] || [ -f /run/.containerenv ] || grep -qE 'docker|kubepods|containerd|lxc|libpod' /proc/1/cgroup 2>/dev/null; then echo container 1; fi; echo session.anon_kb $a; echo nproc $(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN); true`
 
 func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[string]float64, map[string]float64, error) {
 	connection, _, e := s.sshConnect(ctx, record.Asset.ID, false)
@@ -257,7 +257,8 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 		return nil, nil, errors.New("Linux 리소스 조회 실패. /proc 접근 권한을 확인하세요")
 	}
 	part := ""
-	var totalMem, availableMem float64
+	var totalMem, availableMem, hostCores float64
+	bootID, cgroup := "", map[string][]string{}
 	for _, line := range strings.Split(output, "\n") {
 		if strings.HasPrefix(line, "__") {
 			part = line
@@ -309,10 +310,20 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 			}
 		case "__UPTIME__":
 			values["uptime"] = parseNumber(fields[0])
+		case "__NCPU__":
+			hostCores = parseNumber(fields[0])
+		case "__BOOT__":
+			bootID = fields[0]
+		case "__CGROUP__":
+			cgroup[fields[0]] = fields[1:]
 		}
 	}
 	if totalMem > 0 {
 		values["memory-host"] = 100 * (1 - availableMem/totalMem)
+		values["memory-limit"] = totalMem / 1024
+	}
+	if hostCores > 0 {
+		values["cpu-cores"] = hostCores
 	}
 	values["swap"] = (raw["swap_total"] - raw["swap_free"]) / 1024
 	previous := s.previousFor(record.Asset.ID)
@@ -328,6 +339,19 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 			values[id] = value
 		}
 	}
+	if own, ok := containerShare(cgroup, raw, previous, totalMem); ok {
+		host := map[string]float64{}
+		for _, id := range hostLevel {
+			if value, found := values[id]; found {
+				host[id] = value
+				delete(values, id)
+			}
+		}
+		for id, value := range own {
+			values[id] = value
+		}
+		s.observeHost(record.Asset.ID, bootID, host)
+	}
 	if output, err := readCommand(ctx, connection, linuxProcesses); err == nil {
 		s.mu.Lock()
 		last := s.processes[record.Asset.ID]
@@ -341,6 +365,170 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 		}
 	}
 	return values, raw, nil
+}
+
+// Inside a container /proc and df describe the whole Docker VM. Those values
+// belong to the shared host, while the container keeps what only it owns.
+var hostLevel = []string{"node-cpu", "memory-host", "cpu-cores", "memory-limit", "disk", "disk-total", "disk-used", "disk-free", "load", "uptime", "swap"}
+
+// The container's own CPU and RAM against its cgroup allocation, like docker
+// stats: RAM is usage without reclaimable page cache over the memory limit (the
+// whole VM when unlimited), minus the anonymous memory and page tables of this
+// SSH collection session (sshd and shell live in the same cgroup while it runs), CPU is cgroup time over the CPU quota (or the cores
+// it may use). Hosts without limits or container markers are left unchanged.
+func containerShare(cgroup map[string][]string, raw map[string]float64, previous previousSample, totalMemKB float64) (map[string]float64, bool) {
+	value := func(key string) (float64, bool) {
+		if fields := cgroup[key]; len(fields) > 0 {
+			v, e := strconv.ParseFloat(fields[0], 64)
+			return v, e == nil && !math.IsNaN(v) && !math.IsInf(v, 0)
+		}
+		return 0, false
+	}
+	limit, limited := value("mem.max")
+	if !limited {
+		limit, limited = value("v1.mem.limit")
+	}
+	if limited && (limit <= 0 || (totalMemKB > 0 && limit >= totalMemKB*1024)) {
+		limited = false
+	}
+	quota, period := 0.0, 0.0
+	if fields := cgroup["cpu.max"]; len(fields) == 2 && fields[0] != "max" {
+		quota, period = parseNumber(fields[0]), parseNumber(fields[1])
+	} else if q, ok := value("v1.cpu.quota"); ok && q > 0 {
+		p, _ := value("v1.cpu.period")
+		quota, period = q, p
+	}
+	if len(cgroup["container"]) == 0 && !limited && quota <= 0 {
+		return nil, false
+	}
+	own := map[string]float64{}
+	if !limited {
+		limit = totalMemKB * 1024
+	}
+	// Read first in the command with shell builtins, before its own subprocesses add kernel memory.
+	used, ok := value("mem.current")
+	inactive, _ := value("mem.inactive")
+	session, _ := value("session.anon_kb")
+	if ok && limit > 0 {
+		own["memory-host"] = 100 * math.Max(0, used-inactive-session*1024) / limit
+		own["memory-limit"] = limit / 1024 / 1024
+	}
+	cores := cpusetCount(strings.Join(cgroup["cpuset"], ""))
+	if cores == 0 {
+		cores, _ = value("nproc")
+	}
+	if quota > 0 && period > 0 && (cores == 0 || quota/period < cores) {
+		cores = quota / period
+	}
+	if cores > 0 {
+		own["cpu-cores"] = cores
+	}
+	if usec, ok := value("cpu.usage_usec"); ok {
+		raw["cgroup_cpu_usec"] = usec
+	} else if ns, ok := value("v1.cpu.usage"); ok {
+		raw["cgroup_cpu_usec"] = ns / 1000
+	}
+	if rate, ok := deltaRate(raw, previous, "cgroup_cpu_usec"); ok && cores > 0 {
+		own["node-cpu"] = 100 * rate / 1e6 / cores
+	}
+	return own, true
+}
+
+// "0-3,6" → 5.
+func cpusetCount(set string) float64 {
+	count := 0.0
+	for _, part := range strings.Split(strings.TrimSpace(set), ",") {
+		if low, high, found := strings.Cut(part, "-"); found {
+			a, e1 := strconv.Atoi(low)
+			b, e2 := strconv.Atoi(high)
+			if e1 == nil && e2 == nil && b >= a {
+				count += float64(b - a + 1)
+			}
+		} else if _, e := strconv.Atoi(part); e == nil {
+			count++
+		}
+	}
+	return count
+}
+
+type dockerHost struct {
+	Members map[string]bool
+	Written time.Time
+}
+
+// Containers on one kernel share a boot id. Their host-wide values are stored once
+// under a virtual "Docker 호스트" asset instead of being repeated per container.
+func dockerHostID(bootID string) string {
+	clean := strings.ReplaceAll(strings.ToLower(strings.TrimSpace(bootID)), "-", "")
+	if len(clean) < 12 || strings.Trim(clean, "0123456789abcdef") != "" {
+		return ""
+	}
+	return "dockerhost-" + clean[:12]
+}
+func (s *Service) observeHost(member, bootID string, values map[string]float64) {
+	id := dockerHostID(bootID)
+	if id == "" || len(values) == 0 {
+		return
+	}
+	now := time.Now()
+	s.mu.Lock()
+	host := s.hosts[id]
+	if host == nil {
+		host = &dockerHost{Members: map[string]bool{}}
+		s.hosts[id] = host
+	}
+	host.Members[member] = true
+	write := now.Sub(host.Written) >= 10*time.Second
+	if write {
+		host.Written = now
+	}
+	s.mu.Unlock()
+	if write {
+		_ = s.store.Observe(Observation{AssetID: id, Time: now.Unix(), Values: values})
+	}
+}
+
+// Virtual hosts with at least one registered member, for the monitoring snapshot.
+func (s *Service) dockerHosts(registered []Asset) []Asset {
+	byID := map[string]Asset{}
+	for _, a := range registered {
+		byID[a.ID] = a
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.hosts))
+	for id := range s.hosts {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	hosts := []Asset{}
+	for _, id := range ids {
+		host := Asset{ID: id, Name: "Docker 호스트", Kind: "server", Enabled: true, Status: "error", Virtual: true, Tags: []string{}, Dependencies: []string{}}
+		if len(ids) > 1 {
+			host.Name += " · " + strings.TrimPrefix(id, "dockerhost-")[:6]
+		}
+		for member := range s.hosts[id].Members {
+			a, ok := byID[member]
+			if !ok {
+				continue
+			}
+			host.Members = append(host.Members, member)
+			if a.Enabled && a.Status == "connected" {
+				host.Status = "connected"
+			}
+			if a.LastSeen > host.LastSeen {
+				host.LastSeen = a.LastSeen
+			}
+			host.Environment = a.Environment
+		}
+		if len(host.Members) == 0 {
+			continue
+		}
+		sort.Strings(host.Members)
+		host.Message = fmt.Sprintf("컨테이너 %d개가 함께 쓰는 Docker VM 전체 값", len(host.Members))
+		hosts = append(hosts, host)
+	}
+	return hosts
 }
 
 // Per-process CPU ticks; the process name in /proc/<pid>/stat may hold spaces
