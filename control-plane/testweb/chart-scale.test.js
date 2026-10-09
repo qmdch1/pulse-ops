@@ -1,6 +1,6 @@
 import {test, assert} from './harness.js';
 import {metrics} from '/assets/lib/catalog.js';
-import {axisScale, axisRangeLabel, formatAxisTick} from '/assets/lib/chart-scale.js';
+import {axisScale, axisRangeLabel, formatAxisTick, sharedScale} from '/assets/lib/chart-scale.js';
 
 const line = (metricId, unit, values, key = metricId) => ({metricId, unit, key, points: values.map((value, time) => ({time, value}))});
 
@@ -65,4 +65,15 @@ test('capacity and duration axes use explicit binary and time units without chan
     assert.equal(memory.points[0].value, 512);
     assert.equal(axisRangeLabel(axisScale([line('db-network-in', 'B/s', [2048])], 'B/s', 0, 0)), '0–1 MiB/s');
     assert.equal(axisRangeLabel(axisScale([line('uptime', '초', [3600])], '초', 0, 0)), '0–1 일');
+});
+
+test('a family row shares the widest member range and picks one display unit for it', () => {
+    const median = axisScale([line('p50', 'ms', [20])], 'ms', 0, 0), tail = axisScale([line('p99.9', 'ms', [1900])], 'ms', 0, 0);
+    const shared = sharedScale([median, tail], 'ms');
+    assert.equal(shared.low, 0);
+    assert.equal(shared.high, 1900);
+    assert.equal(axisRangeLabel(shared), '0–1.9 초');
+    assert.equal(sharedScale([], 'ms'), null);
+    const traffic = sharedScale([axisScale([line('db-network-in', 'B/s', [10])], 'B/s', 0, 0), axisScale([line('db-network-out', 'B/s', [3 * 1048576])], 'B/s', 0, 0)], 'B/s');
+    assert.equal(axisRangeLabel(traffic), '0–3 MiB/s');
 });

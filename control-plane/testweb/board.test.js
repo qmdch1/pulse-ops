@@ -1,6 +1,8 @@
 import {test} from './harness.js';
 import {assert} from './harness.js';
-import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricsForAsset, observedForAsset, relatedAssets } from '/assets/lib/board.js';
+import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricFamilies, metricRecipes, metricsForAsset, observedForAsset, relatedAssets } from '/assets/lib/board.js';
+import { metrics, metricById } from '/assets/lib/catalog.js';
+import { recipeKey } from '/assets/lib/chart-layout.js';
 import { registeredIncidents } from '/assets/lib/assets.js';
 const asset = (id, kind = 'application', dependencies = []) => ({ id, name: id, kind, address: '', port: 0, username: '', database: '', tlsMode: '', os: '', metricsUrl: '', environment: 'test', ssh: { host: '', port: 0, username: '', jumpId: '', fingerprint: '' }, dependencies, enabled: true, version: 1, status: 'connected', lastSeen: '', message: '', hasPassword: false, hasSshPassword: false, hasPrivateKey: false, hasPassphrase: false });
 const metric = (id, values) => ({ id, state: 'ok', latest: null, series: Object.entries(values).map(([assetId, value]) => ({ labels: { assetId, name: assetId }, points: Array.from({ length: 21 }, (_, i) => ({ time: 9700 + i * 15, value })) })) });
@@ -153,4 +155,50 @@ test('saved selection excludes deleted and duplicate assets while preserving exp
     assert.deepEqual(boardSelection(null, assets), assets.map(a => a.id));
     assert.deepEqual(boardSelection([], assets), []);
     assert.deepEqual(boardSelection(['api-a', 'deleted', 'api-a', 7, 'db'], assets), ['api-a', 'db']);
+});
+test('every metric family is a single-unit set of distinct catalog metrics', () => {
+    const seen = new Set();
+    for (const family of metricFamilies) {
+        assert.ok(family.members.length >= 2, family.id);
+        for (const [id] of family.members) {
+            assert.ok(metricById.has(id), id);
+            assert.ok(!seen.has(id), id);
+            seen.add(id);
+        }
+        assert.equal(new Set(family.members.map(([id]) => metricById.get(id).unit)).size, 1, family.id);
+    }
+});
+const catalogOrder = ids => metrics.filter(m => ids.includes(m.id));
+test('asset detail keeps related percentiles and outcomes together in family order without changing chart identities', () => {
+    const values = { 'api-a': 10, 'api-b': 20 }, ids = ['requests', 'p50', 'p99', 'p99.9', 'latency-mean', 'errors', 'failed-latency', 'success-latency', 'inflight'];
+    const s = snapshot(ids.map(id => metric(id, values)));
+    const recipes = metricRecipes(s, ['api-a', 'api-b'], catalogOrder(ids));
+    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p50', 'p99', 'p99.9', 'latency-mean', 'errors', 'success-latency', 'failed-latency', 'inflight']);
+    assert.deepEqual(recipes.filter(r => r.family).map(r => [r.family.row, r.family.label]), [['latency:0', 'P50'], ['latency:0', 'P99'], ['latency:0', 'P99.9'], ['latency:0', '평균'], ['outcome-latency:0', '성공'], ['outcome-latency:0', '실패']]);
+    const p99 = recipes.find(r => r.metricIds[0] === 'p99');
+    assert.equal(p99.title, '응답 시간 · P99');
+    assert.equal(recipeKey(p99), recipeKey({ title: p99.title, assetIds: ['api-a', 'api-b'], metricIds: ['p99'], keys: ['p99:api-a', 'p99:api-b'] }));
+    assert.ok(!recipes.find(r => r.metricIds[0] === 'requests').family);
+    assert.ok(metricRecipes(s, ['api-a'], catalogOrder(['p99', 'requests'])).every(r => !r.family));
+});
+test('event evidence groups percentiles where the first one appears, whatever the evidence order', () => {
+    const s = snapshot(['p99', 'cpu', 'p97'].map(id => metric(id, { 'api-a': 1 })));
+    const recipes = metricRecipes(s, ['api-a'], ['p99', 'cpu', 'p97'].map(id => metricById.get(id)));
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['p97', 'P97'], ['p99', 'P99'], ['cpu', undefined]]);
+});
+test('dashboard groups server receive and send traffic into one row per selected server set', () => {
+    const values = { 'host-a': 1, 'host-b': 2 };
+    const s = snapshot(['node-cpu', 'memory-host', 'network-in', 'network-out'].map(id => metric(id, values)));
+    s.assets = ['host-a', 'host-b'].map(id => asset(id, 'server'));
+    const recipes = dashboardRecipes(s, ['host-a', 'host-b']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row]), [['node-cpu', undefined], ['memory-host', undefined], ['network-in', 'network:0'], ['network-out', 'network:0']]);
+    assert.ok(dashboardRecipes(snapshot([metric('network-in', { host: 1 })]), ['host']).every(r => !r.family));
+});
+test('crowded families split into one row per part and keep every selected line', () => {
+    const ids = Array.from({ length: 9 }, (_, i) => 'api-' + i), values = Object.fromEntries(ids.map((id, i) => [id, i]));
+    const s = snapshot([metric('p50', values), metric('p99', values)]);
+    s.assets = ids.map(id => asset(id));
+    const recipes = metricRecipes(s, ids, catalogOrder(['p50', 'p99']));
+    assert.deepEqual(recipes.map(r => [r.family.title, r.title]), [['응답 시간 분포', '응답 시간 · P50'], ['응답 시간 분포', '응답 시간 · P99'], ['응답 시간 분포 · 2', '응답 시간 · P50 · 2'], ['응답 시간 분포 · 2', '응답 시간 · P99 · 2']]);
+    assert.equal(recipes.flatMap(r => r.keys).length, 18);
 });

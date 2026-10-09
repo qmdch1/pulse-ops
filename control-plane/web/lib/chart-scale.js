@@ -20,6 +20,14 @@ export function axisScale(lines, unit, start, end, hidden = new Set()) {
     return {low, high, ...axisUnit(unit, Math.max(Math.abs(low), Math.abs(high)))};
 }
 
+// Small multiples of one family use the widest member range so equal heights
+// mean equal values across the row.
+export function sharedScale(scales, unit) {
+    if (!scales.length) return null;
+    const low = Math.min(...scales.map(scale => scale.low)), high = Math.max(...scales.map(scale => scale.high));
+    return {low, high, ...axisUnit(unit, Math.max(Math.abs(low), Math.abs(high)))};
+}
+
 function axisUnit(unit, extent) {
     const families = {
         ms: [[86400000, '일'], [3600000, '시간'], [60000, '분'], [1000, '초']],

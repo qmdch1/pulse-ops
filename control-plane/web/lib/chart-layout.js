@@ -6,3 +6,6 @@ export function readLayout(raw){return {groups:Array.isArray(raw?.groups)?raw.gr
 export function mergeLayout(groups,source,target){if(source===target)return groups;const a=groups.find(g=>g.includes(source))||[source],b=groups.find(g=>g.includes(target))||[target];if(a===b)return groups;return [...groups.filter(g=>g!==a&&g!==b),[...new Set([...b,...a])]].slice(-100)}
 export function activeGroups(groups,available){const used=new Set(),result=[];for(const g of groups)if(g.length>1&&g.every(k=>available.has(k)&&!used.has(k))){g.forEach(k=>used.add(k));result.push(g)}return result}
 export function removeGroup(groups,key){return groups.filter(g=>!g.includes(key))}
+// A family stays on one line while each card keeps a readable width, otherwise it
+// wraps into balanced rows (6 → 3+3, 5 → 3+2) instead of leaving one orphan.
+export function familyColumns(width,count,min=150,gap=8){if(count<2)return 1;const fit=Math.max(1,Math.floor((width+gap)/(min+gap)));return fit>=count?count:Math.ceil(count/Math.ceil(count/fit))}
