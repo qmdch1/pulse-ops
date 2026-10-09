@@ -77,7 +77,7 @@ test('dashboard keeps operational signals while full collection and event eviden
     ]);
     const before = structuredClone(s), incidents = registeredIncidents(s);
     const recipes = dashboardRecipes(s, ['api-a', 'host']);
-    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['node-cpu', 'CPU'], ['memory-host', 'RAM'], ['disk-used', '디스크'], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['requests', undefined], ['errors', undefined]]);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['node-cpu', 'CPU'], ['memory-host', 'RAM'], ['disk-used', '디스크'], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['requests', '요청량'], ['errors', '5xx 오류율']]);
     assert.deepEqual(recipes.find(r => r.metricIds[0] === 'p99').keys, ['p99:api-a']);
     assert.ok(metricsForAsset(s, s.assets[0]).some(m => m.id === 'cookie-expiry'));
     assert.ok(metricsForAsset(s, s.assets[3]).some(m => m.id === 'uptime'));
@@ -172,16 +172,17 @@ test('every metric family is a single-unit set of distinct catalog metrics', () 
     }
 });
 const catalogOrder = ids => metrics.filter(m => ids.includes(m.id));
-test('asset detail keeps related percentiles and outcomes together in family order without changing chart identities', () => {
+test('asset detail keeps related percentiles, traffic and outcomes together in family order without changing chart identities', () => {
     const values = { 'api-a': 10, 'api-b': 20 }, ids = ['requests', 'p50', 'p99', 'p99.9', 'latency-mean', 'errors', 'failed-latency', 'success-latency', 'inflight'];
     const s = snapshot(ids.map(id => metric(id, values)));
     const recipes = metricRecipes(s, ['api-a', 'api-b'], catalogOrder(ids));
-    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p50', 'p99', 'p99.9', 'latency-mean', 'errors', 'success-latency', 'failed-latency', 'inflight']);
-    assert.deepEqual(recipes.filter(r => r.family).map(r => [r.family.row, r.family.label]), [['latency:0', 'P50'], ['latency:0', 'P99'], ['latency:0', 'P99.9'], ['latency:0', '평균'], ['outcome-latency:0', '성공'], ['outcome-latency:0', '실패']]);
+    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'errors', 'p50', 'p99', 'p99.9', 'latency-mean', 'success-latency', 'failed-latency', 'inflight']);
+    assert.deepEqual(recipes.filter(r => r.family).map(r => [r.family.row, r.family.label]), [['traffic:0', '요청량'], ['traffic:0', '5xx 오류율'], ['latency:0', 'P50'], ['latency:0', 'P99'], ['latency:0', 'P99.9'], ['latency:0', '평균'], ['outcome-latency:0', '성공'], ['outcome-latency:0', '실패']]);
     const p99 = recipes.find(r => r.metricIds[0] === 'p99');
     assert.equal(p99.title, '응답 시간 · P99');
     assert.equal(recipeKey(p99), recipeKey({ title: p99.title, assetIds: ['api-a', 'api-b'], metricIds: ['p99'], keys: ['p99:api-a', 'p99:api-b'] }));
-    assert.ok(!recipes.find(r => r.metricIds[0] === 'requests').family);
+    assert.equal(recipes.find(r => r.metricIds[0] === 'errors').title, '서버 오류율 · 5xx');
+    assert.ok(!recipes.find(r => r.metricIds[0] === 'inflight').family);
     assert.ok(metricRecipes(s, ['api-a'], catalogOrder(['p99', 'requests'])).every(r => !r.family));
 });
 test('event evidence groups percentiles where the first one appears, whatever the evidence order', () => {
@@ -200,7 +201,7 @@ test('dashboard groups server receive and send traffic into one row per selected
 test('application dashboard shows P50, P95, P97, P99 and P99.9 as one latency row without the mean', () => {
     const s = snapshot(['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'latency-mean', 'errors'].map(id => metric(id, { 'api-a': 10, 'api-b': 20 })));
     const recipes = dashboardRecipes(s, ['api-a', 'api-b']);
-    const row = recipes.filter(r => r.family);
+    const row = recipes.filter(r => r.family?.id === 'latency');
     assert.deepEqual(row.map(r => r.family.label), ['P50', 'P95', 'P97', 'P99', 'P99.9']);
     assert.ok(row.every(r => r.family.row === 'latency:0' && r.title.startsWith('응답 시간 · ')));
     assert.deepEqual(recipes.map(r => r.metricIds[0]), ['p50', 'p95', 'p97', 'p99', 'p99.9', 'requests', 'errors']);
@@ -209,8 +210,67 @@ test('dashboard starts with CPU, RAM and disk, then the latency row, then the re
     const s = snapshot(['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory', 'node-cpu', 'memory-host', 'disk-used', 'db-probe'].map(id => metric(id, { 'api-a': 1, host: 2, db: 3 })));
     const recipes = dashboardRecipes(s, ['api-a', 'host', 'db']);
     assert.deepEqual(recipes.slice(0, 8).map(r => r.family?.row), ['resources:0', 'resources:0', 'resources:0', 'latency:0', 'latency:0', 'latency:0', 'latency:0', 'latency:0']);
-    assert.deepEqual(recipes.slice(0, 3).map(r => [r.family.label, r.assetIds]), [['CPU', ['host']], ['RAM', ['host']], ['디스크', ['host']]]);
-    assert.deepEqual(recipes.slice(8).map(r => r.metricIds[0]), ['requests', 'errors', 'cpu', 'memory', 'db-probe']);
+    assert.deepEqual(recipes.slice(0, 3).map(r => [r.family.label, r.assetIds]), [['CPU', ['api-a', 'host']], ['RAM', ['api-a', 'host']], ['디스크', ['host']]]);
+    assert.deepEqual(recipes.slice(8).map(r => [r.metricIds[0], r.family?.row]), [['requests', 'traffic:0'], ['errors', 'traffic:0'], ['cpu', 'process:0'], ['memory', 'process:0'], ['db-probe', undefined]]);
+});
+const dbAssets = () => [asset('pg', 'postgres'), asset('my', 'mysql'), asset('cache', 'redis')];
+const dbSnapshot = () => {
+    const s = snapshot(['db-up', 'db-probe', 'db-transactions', 'db-statements', 'db-connections', 'db-connection-usage', 'db-locks', 'db-lock-waiters', 'db-buffer', 'mysql-buffer-hit', 'redis-up', 'redis-probe', 'redis-commands', 'redis-used', 'redis-hit', 'redis-clients'].map(id => metric(id, id.startsWith('redis') ? { cache: 1 } : { pg: 2, my: 3 })));
+    s.assets = dbAssets();
+    return s;
+};
+test('PostgreSQL dashboard shows response, transactions, connections and locks as one database row with an axis per card', () => {
+    const recipes = dashboardRecipes(dbSnapshot(), ['pg']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row, r.family?.label]), [['db-probe', 'database:0', '응답'], ['db-transactions', 'database:0', '트랜잭션'], ['db-connections', 'database:0', '연결'], ['db-locks', 'database:0', '잠금']]);
+    assert.ok(recipes.every(r => r.family.title === '데이터베이스' && r.family.mixed && r.family.axis === r.metricIds[0] && r.title === metricById.get(r.metricIds[0]).title));
+});
+test('MySQL dashboard shows response, statements, connection usage and lock waiters as one database row', () => {
+    const recipes = dashboardRecipes(dbSnapshot(), ['my']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['db-probe', '응답'], ['db-statements', '명령'], ['db-connection-usage', '연결 사용률'], ['db-lock-waiters', '잠금 대기']]);
+    assert.ok(recipes.every(r => r.family.row === 'database:0' && r.assetIds.length === 1 && r.assetIds[0] === 'my'));
+});
+test('mixed database engines share one row where each card keeps only the engines that report it', () => {
+    const recipes = dashboardRecipes(dbSnapshot(), ['pg', 'my']);
+    assert.deepEqual(recipes.map(r => [r.family?.label, r.assetIds]), [['응답', ['pg', 'my']], ['트랜잭션', ['pg']], ['명령', ['my']], ['연결', ['pg']], ['연결 사용률', ['my']], ['잠금', ['pg']], ['잠금 대기', ['my']]]);
+    assert.ok(recipes.every(r => r.family.row === 'database:0'));
+    assert.deepEqual(recipes[0].keys, ['db-probe:pg', 'db-probe:my']);
+});
+test('Redis dashboard shows response, commands, memory and hit ratio as one row', () => {
+    const recipes = dashboardRecipes(dbSnapshot(), ['cache']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row, r.family?.label]), [['redis-probe', 'redis:0', '응답'], ['redis-commands', 'redis:0', '명령'], ['redis-used', 'redis:0', '메모리'], ['redis-hit', 'redis:0', '적중률']]);
+    assert.ok(recipes.every(r => r.family.title === 'Redis' && r.family.mixed && !r.family.axis));
+});
+test('application dashboard groups request traffic and process resources into their own rows', () => {
+    const s = snapshot(['requests', 'errors', 'cpu', 'memory'].map(id => metric(id, { 'api-a': 1, 'api-b': 2 })));
+    const recipes = dashboardRecipes(s, ['api-a', 'api-b']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row, r.family?.label]), [['requests', 'traffic:0', '요청량'], ['errors', 'traffic:0', '5xx 오류율'], ['cpu', 'process:0', 'CPU'], ['memory', 'process:0', '메모리']]);
+    assert.ok(recipes.every(r => r.family.mixed && r.keys.length === 2));
+    assert.deepEqual(dashboardRecipes(s, ['api-a']).map(r => r.family.title), ['트래픽', '트래픽', '프로세스', '프로세스']);
+});
+test('a full dashboard orders rows from resources and latency through traffic, process, network, database and Redis to single charts', () => {
+    const ids = ['node-cpu', 'memory-host', 'disk-used', 'network-in', 'network-out', 'requests', 'errors', 'p50', 'p99', 'cpu', 'memory', 'db-probe', 'db-transactions', 'db-statements', 'db-connections', 'db-connection-usage', 'db-locks', 'db-lock-waiters', 'redis-probe', 'redis-commands', 'redis-used', 'redis-hit', 'probe-latency'];
+    const all = { host: 1, 'api-a': 1, pg: 1, my: 1, cache: 1, web: 1 };
+    const s = snapshot(ids.map(id => metric(id, all)));
+    s.assets = [...dbAssets(), asset('web', 'http'), asset('api-a'), asset('host', 'server')];
+    const recipes = dashboardRecipes(s, s.assets.map(a => a.id));
+    assert.deepEqual([...new Set(recipes.map(r => r.family?.id || r.metricIds[0]))], ['resources', 'latency', 'traffic', 'process', 'network', 'database', 'redis', 'probe-latency']);
+    assert.equal(recipes.filter(r => r.family?.id === 'database').length, 7);
+    const process = recipes.filter(r => r.family?.id === 'process');
+    assert.deepEqual(process.map(r => [r.family.label, r.assetIds]), [['CPU', ['api-a', 'host']], ['메모리', ['api-a']]]);
+    assert.equal(new Set(recipes.map(r => r.metricIds[0])).size, recipes.length);
+});
+test('server-only and HTTP selections keep partnerless metrics as ordinary charts', () => {
+    const s = snapshot(['node-cpu', 'cpu', 'probe-latency'].map(id => metric(id, { host: 1, web: 2 })));
+    s.assets.push(asset('web', 'http'));
+    assert.deepEqual(dashboardRecipes(s, ['host', 'web']).map(r => [r.metricIds[0], r.family]), [['node-cpu', undefined], ['cpu', undefined], ['probe-latency', undefined]]);
+});
+test('application containers join the CPU and RAM row measured against their own allocation', () => {
+    const s = snapshot([metric('node-cpu', { 'api-a': 12, 'api-b': 30, host: 3 }), metric('memory-host', { 'api-a': 24, host: 45 }), metric('cpu-cores', { 'api-a': 0.5, 'api-b': 0.5, host: 12 }), metric('memory-limit', { 'api-a': 192, host: 15857 }), metric('cpu', { 'api-a': 9 }), metric('memory', { 'api-a': 40 })]);
+    const recipes = dashboardRecipes(s, ['api-a', 'api-b', 'host']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label, r.assetIds]), [['node-cpu', 'CPU', ['api-a', 'api-b', 'host']], ['memory-host', 'RAM', ['api-a', 'host']], ['cpu', 'CPU', ['api-a']], ['memory', '메모리', ['api-a']]]);
+    assert.deepEqual(comparisonLines(s, ['api-a', 'api-b'], ['node-cpu', 'memory-host']).map(l => [l.key, l.allocation, l.allocationUnit]), [['node-cpu:api-a', 0.5, '코어'], ['node-cpu:api-b', 0.5, '코어'], ['memory-host:api-a', 192, 'MiB']]);
+    // An application without the optional allocation metrics keeps only process CPU and RSS.
+    assert.deepEqual(dashboardRecipes(snapshot([metric('cpu', { 'api-b': 9 }), metric('memory', { 'api-b': 40 })]), ['api-b']).map(r => [r.metricIds[0], r.family?.id]), [['cpu', 'process'], ['memory', 'process']]);
 });
 test('server dashboard shows CPU, process CPU, RAM and one disk usage chart', () => {
     const s = snapshot(['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'uptime', 'swap'].map(id => metric(id, { host: 10 })));

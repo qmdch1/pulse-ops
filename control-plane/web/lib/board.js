@@ -55,11 +55,20 @@ export function metricRecipes(snapshot, ids, definitions) {
     }));
 }
 // One quantity measured at several percentiles, windows, directions or policies.
-// Members share a unit and read best side by side on one axis.
+// Members share a unit and read best side by side on one axis. mixedUnits families
+// gather different signals of one thing; only cards of one unit share an axis.
 export const metricFamilies = [
     // CPU and RAM share 0-100 %; disk usage keeps its own axis up to the largest capacity.
     { id: 'resources', title: '기본 리소스', mixedUnits: true, members: [['node-cpu', 'CPU'], ['memory-host', 'RAM'], ['disk-used', '디스크']] },
     { id: 'latency', title: '응답 시간 분포', members: [['p50', 'P50'], ['p95', 'P95'], ['p97', 'P97'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['latency-mean', '평균']] },
+    // Several sides of one service or engine in one row; each unit keeps its own axis.
+    { id: 'traffic', title: '트래픽', mixedUnits: true, members: [['requests', '요청량'], ['errors', '5xx 오류율']] },
+    { id: 'process', title: '프로세스', mixedUnits: true, members: [['cpu', 'CPU'], ['memory', '메모리']] },
+    // PostgreSQL brings transactions, connections and locks; MySQL, MariaDB and Oracle bring
+    // statements, connection usage and lock waiters. Connections and locks are both counts of
+    // different things, so every card keeps its own axis.
+    { id: 'database', title: '데이터베이스', mixedUnits: true, separateAxes: true, members: [['db-probe', '응답'], ['db-transactions', '트랜잭션'], ['db-statements', '명령'], ['db-connections', '연결'], ['db-connection-usage', '연결 사용률'], ['db-locks', '잠금'], ['db-lock-waiters', '잠금 대기']] },
+    { id: 'redis', title: 'Redis', mixedUnits: true, members: [['redis-probe', '응답'], ['redis-commands', '명령'], ['redis-used', '메모리'], ['redis-hit', '적중률']] },
     { id: 'outcome-latency', title: '성공·실패 요청 P99', members: [['success-latency', '성공'], ['failed-latency', '실패']] },
     { id: 'event-loop', title: '이벤트 루프 지연', members: [['loop-p99', 'P99'], ['loop-max', '최대']] },
     { id: 'slo-burn', title: '오류 예산 소진 속도', members: [['slo-burn', '5분'], ['slo-burn-hour', '1시간']] },
@@ -92,14 +101,15 @@ export function arrangeFamilies(recipes) {
             rows.set(row, []);
             result.push(rows.get(row));
         }
-        rows.get(row).push({ ...recipe, family: { id: member.family.id, row, title: member.family.title + (part ? ' · ' + (part + 1) : ''), label: member.label, index: member.index } });
+        rows.get(row).push({ ...recipe, family: { id: member.family.id, row, title: member.family.title + (part ? ' · ' + (part + 1) : ''), label: member.label, index: member.index, ...(member.family.mixedUnits ? { mixed: true } : {}), ...(member.family.separateAxes ? { axis: recipe.metricIds[0] } : {}) } });
     }
     return result.flatMap(item => Array.isArray(item) ? item.sort((a, b) => a.family.index - b.family.index) : [item]);
 }
 // The overview is deliberately small. Full collection and event evidence use
 // metricsForAsset/eventMetricIds and never inherit this display filter.
 export const dashboardMetrics = {
-    application: ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
+    // CPU and RAM against the container's allocation when the application reports it.
+    application: ['node-cpu', 'memory-host', 'requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
     server: ['node-cpu', 'cpu', 'memory-host', 'disk-used', 'network-in', 'network-out'],
     postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
     mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
@@ -108,8 +118,10 @@ export const dashboardMetrics = {
     redis: ['redis-probe', 'redis-commands', 'redis-used', 'redis-hit'],
     http: ['probe-latency'],
 };
-// Basic host resources first, then the latency distribution, then everything else.
-const dashboardOrder = [...new Set(['node-cpu', 'memory-host', 'disk-used', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'requests', 'errors', 'cpu', 'memory', ...Object.values(dashboardMetrics).flat()])];
+// Basic resources first, then the latency distribution, then the other rows and
+// finally single charts. A row sits at its first member, so family order is row order.
+const dashboardRows = ['resources', 'latency', 'traffic', 'process', 'network', 'database', 'redis'];
+const dashboardOrder = [...new Set([...dashboardRows.flatMap(id => metricFamilies.find(family => family.id === id).members.map(([metric]) => metric)), ...Object.values(dashboardMetrics).flat()])];
 // A dashboard chart belongs to a metric; each eligible asset keeps its own line.
 export function dashboardRecipes(snapshot, ids) {
     const selected = snapshot.assets.filter(asset => ids.includes(asset.id));
@@ -118,7 +130,7 @@ export function dashboardRecipes(snapshot, ids) {
         return owners.length ? metricRecipes(snapshot, owners.map(asset => asset.id), [metricById.get(id)]).map(recipe => ({...recipe, subtitle: undefined})) : [];
     }));
 }
-// CPU, RAM and disk at the top are server metrics: the servers a selection leaves out entirely.
+// Disk and the servers' own CPU/RAM at the top come from servers: the servers a selection leaves out entirely.
 export function unselectedServers(assets, ids) {
     const servers = assets.filter(asset => asset.kind === 'server' && !asset.virtual);
     return ids.length && !servers.some(asset => ids.includes(asset.id)) ? servers : [];
