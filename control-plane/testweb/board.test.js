@@ -70,12 +70,12 @@ test('dashboard keeps operational signals while full collection and event eviden
         metric('requests', {'api-a': 25}), metric('p99', {'api-a': 100, host: 999}),
         metric('errors', {'api-a': 0}), metric('p50', {'api-a': 20}), metric('p99.9', {'api-a': 150}),
         metric('cookie-expiry', {'api-a': -15}), metric('node-cpu', {host: 3}), metric('memory-host', {host: 45}),
-        metric('disk', {host: 50}), metric('load', {host: 1}), metric('uptime', {host: 90000}),
+        metric('disk', {host: 50}), metric('disk-used', {host: 20}), metric('load', {host: 1}), metric('uptime', {host: 90000}),
         metric('targets-down', {host: 0}), metric('scrape-age', {host: 2}),
     ]);
     const before = structuredClone(s), incidents = registeredIncidents(s);
     const recipes = dashboardRecipes(s, ['api-a', 'host']);
-    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['requests', undefined], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['errors', undefined], ['node-cpu', undefined], ['memory-host', undefined], ['disk', undefined]]);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['requests', undefined], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['errors', undefined], ['node-cpu', undefined], ['memory-host', undefined], ['disk-used', undefined]]);
     assert.deepEqual(recipes.find(r => r.metricIds[0] === 'p99').keys, ['p99:api-a']);
     assert.ok(metricsForAsset(s, s.assets[0]).some(m => m.id === 'cookie-expiry'));
     assert.ok(metricsForAsset(s, s.assets[3]).some(m => m.id === 'uptime'));
@@ -202,12 +202,20 @@ test('application dashboard shows P50, P95, P97, P99 and P99.9 as one latency ro
     assert.ok(row.every(r => r.family.row === 'latency:0' && r.title.startsWith('응답 시간 · ')));
     assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors']);
 });
-test('server dashboard shows process CPU, RAM and disk capacity with total, used and free on one axis', () => {
+test('server dashboard shows CPU, process CPU, RAM and one disk usage chart', () => {
     const s = snapshot(['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'uptime', 'swap'].map(id => metric(id, { host: 10 })));
     const recipes = dashboardRecipes(s, ['host']);
-    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['node-cpu', undefined], ['cpu', undefined], ['memory-host', undefined], ['disk', undefined], ['disk-total', '전체'], ['disk-used', '사용'], ['disk-free', '남음']]);
-    assert.ok(recipes.filter(r => r.family).every(r => r.family.row === 'disk-capacity:0'));
-    assert.ok(['cpu', 'disk-total', 'disk-used', 'disk-free'].every(id => metricsForAsset(snapshot(), s.assets[3]).some(m => m.id === id)));
+    assert.deepEqual(recipes.map(r => [r.title, r.family?.label]), [['CPU 사용률', undefined], ['프로세스 CPU · 최댓값', undefined], ['RAM 사용률', undefined], ['디스크 사용량', undefined]]);
+    assert.ok(['cpu', 'disk', 'disk-total', 'disk-used', 'disk-free'].every(id => metricsForAsset(snapshot(), s.assets[3]).some(m => m.id === id)));
+    const detail = metricRecipes(s, ['host'], metricsForAsset(s, s.assets[3])).filter(r => r.family?.id === 'disk-capacity');
+    assert.deepEqual(detail.map(r => r.family.label), ['전체', '사용', '남음']);
+});
+test('each disk usage line carries its own latest total capacity', () => {
+    const total = metric('disk-total', { 'host-a': 1006.85, 'host-b': 50 });
+    total.series[0].points.at(-1).value = null;
+    const s = snapshot([metric('disk-used', { 'host-a': 20.7, 'host-b': 45, 'host-c': 3 }), total, metric('disk-free', { 'host-a': 1 })]);
+    assert.deepEqual(comparisonLines(s, ['host-a', 'host-b', 'host-c'], ['disk-used']).map(l => [l.assetId, l.capacity]), [['host-a', 1006.85], ['host-b', 50], ['host-c', undefined]]);
+    assert.equal(comparisonLines(s, ['host-a'], ['disk-free'])[0].capacity, undefined);
 });
 test('crowded families split into one row per part and keep every selected line', () => {
     const ids = Array.from({ length: 9 }, (_, i) => 'api-' + i), values = Object.fromEntries(ids.map((id, i) => [id, i]));

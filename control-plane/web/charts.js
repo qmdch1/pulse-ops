@@ -8,6 +8,8 @@ import {esc,icon,shortTime,fullTime,preference,savePreference} from './ui.js';
 
 const palette=['#b5a1ff','#63d9bd','#6dbafb','#f3bc77','#ef8eae','#cbd376','#c39beb','#71cad2'];
 const format=v=>v===null||v===undefined?'—':formatNumber(v);
+// Usage lines read against their own capacity: "20.7 / 1,006.9 GiB".
+const unitOf=line=>line.capacity?`/ ${format(line.capacity)} ${line.unit}`:line.unit;
 const clockFormat=new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Seoul'});
 const groups=new Set();
 const layout=readLayout(preference('pulse-chart-layout-v1',{}));
@@ -129,7 +131,7 @@ class CanvasChart {
    if(!button){button=document.createElement('button');button.dataset.series=line.key;button.innerHTML='<i></i><span></span><strong></strong>';button.onclick=()=>{if(this.hidden.has(line.key))this.hidden.delete(line.key);else this.hidden.add(line.key);button.classList.toggle('muted',this.hidden.has(line.key));button.setAttribute('aria-pressed',String(!this.hidden.has(line.key)));this.draw()};legend.append(button)}
    existing.delete(line.key);button.title=line.name;button.setAttribute('aria-pressed',String(!this.hidden.has(line.key)));button.classList.toggle('muted',this.hidden.has(line.key));
    button.querySelector('span').textContent=this.recipe.metricIds.length===1?line.assetName||line.name:line.name;button.querySelector('i').style.background=palette[index%8];
-   const number=button.querySelector('strong'),previous=number.textContent;number.innerHTML=`${format(value)} <small>${esc(line.unit==='0/1'?'(0 / 1)':line.unit)}</small>`;
+   const number=button.querySelector('strong'),previous=number.textContent;number.innerHTML=`${format(value)} <small>${esc(line.unit==='0/1'?'(0 / 1)':unitOf(line))}</small>`;
    if(previous&&previous!==number.textContent)valueChanged(number);
   });
   for(const button of existing.values())button.remove();
@@ -176,13 +178,15 @@ class CanvasChart {
   this.lines.forEach((line,index)=>{if(this.hidden.has(line.key))return;const scale=this.scales[line.unit],color=this.paint(line,index);ctx.strokeStyle=palette[color%8];ctx.lineWidth=this.compact?1.5:1.7;ctx.setLineDash(color>3?[5,3]:[]);ctx.beginPath();let drawing=false;
    for(const row of this.rows){const value=row['v'+index];if(value===null||value===undefined){drawing=false;continue}const x=left+(row.time-this.snapshot.start)/(this.snapshot.end-this.snapshot.start)*this.plotWidth,y=12+this.plotHeight*(1-(value-scale.low)/(scale.high-scale.low));if(drawing)ctx.lineTo(x,y);else ctx.moveTo(x,y);drawing=true}ctx.stroke();
   });
+  // The axis tops out at the largest capacity; a smaller one gets a faint ceiling in its own color.
+  this.lines.forEach((line,index)=>{const scale=this.scales[line.unit];if(this.hidden.has(line.key)||!line.capacity||line.capacity>=scale.high)return;const y=12+this.plotHeight*(1-(line.capacity-scale.low)/(scale.high-scale.low));ctx.strokeStyle=palette[this.paint(line,index)%8];ctx.globalAlpha=.6;ctx.setLineDash([2,4]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+this.plotWidth,y);ctx.stroke();ctx.globalAlpha=1});
   if(this.recipe.warning!==undefined&&this.units.length===1){const scale=this.scales[this.units[0]],y=12+this.plotHeight*(1-(this.recipe.warning-scale.low)/(scale.high-scale.low));ctx.strokeStyle='#c9a46a';ctx.setLineDash([4,5]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+this.plotWidth,y);ctx.stroke()}
   ctx.restore();this.drawCursor();
  }
  drawCursor(){
   if(!this.visible||!this.width)return;const ctx=this.overlay.getContext('2d');ctx.clearRect(0,0,this.width,this.height);this.tooltip.hidden=cursor===null||!this.pointer;if(cursor===null)return;
   const x=this.left+(cursor-this.snapshot.start)/(this.snapshot.end-this.snapshot.start)*this.plotWidth;ctx.strokeStyle='#a995df';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,8);ctx.lineTo(x,this.height-25);ctx.stroke();
-  if(this.pointer){const bucket=Math.floor(cursor/this.snapshot.step)*this.snapshot.step,row=this.rows.find(r=>r.time===bucket);this.tooltip.innerHTML=`<strong>${esc(fullTime(cursor))}</strong>`+this.lines.map((l,i)=>this.hidden.has(l.key)?'':`<div><span>${esc(this.compact?l.assetName:l.name)}</span><b>${format(row?.['v'+i])} ${esc(l.unit)}</b></div>`).join('');this.tooltip.style.left='0px';this.tooltip.style.left=`${Math.min(Math.max(8,x),Math.max(8,this.width-this.tooltip.offsetWidth-8))}px`;this.tooltip.style.top='4px'}
+  if(this.pointer){const bucket=Math.floor(cursor/this.snapshot.step)*this.snapshot.step,row=this.rows.find(r=>r.time===bucket);this.tooltip.innerHTML=`<strong>${esc(fullTime(cursor))}</strong>`+this.lines.map((l,i)=>this.hidden.has(l.key)?'':`<div><span>${esc(this.compact?l.assetName:l.name)}</span><b>${format(row?.['v'+i])} ${esc(unitOf(l))}</b></div>`).join('');this.tooltip.style.left='0px';this.tooltip.style.left=`${Math.min(Math.max(8,x),Math.max(8,this.width-this.tooltip.offsetWidth-8))}px`;this.tooltip.style.top='4px'}
  }
  destroy(){if(drag?.chart===this)drag.cancel();this.resize.disconnect();delete this.node._pulseChart}
 }

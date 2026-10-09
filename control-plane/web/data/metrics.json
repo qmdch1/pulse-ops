@@ -174,7 +174,7 @@
   {
     "group": "resources",
     "id": "node-cpu",
-    "title": "호스트 CPU 사용률",
+    "title": "CPU 사용률",
     "unit": "%",
     "axisMax": 100,
     "query": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\",__SCOPE__}[5m])))",
@@ -208,7 +208,7 @@
   {
     "group": "resources",
     "id": "memory-host",
-    "title": "호스트 RAM 사용률",
+    "title": "RAM 사용률",
     "unit": "%",
     "axisMax": 100,
     "query": "max(100 * (1-node_memory_MemAvailable_bytes{__SCOPE__}/node_memory_MemTotal_bytes{__SCOPE__}))",
@@ -247,7 +247,8 @@
     "unit": "GiB",
     "axisMax": 100,
     "query": "max(node_filesystem_size_bytes{mountpoint=\"/\",__SCOPE__} - node_filesystem_free_bytes{mountpoint=\"/\",__SCOPE__}) / 1024^3",
-    "description": "루트(/) 마운트에서 사용 중인 용량입니다. 예약 블록 때문에 사용량과 남은 용량의 합은 전체 용량보다 작을 수 있습니다.",
+    "description": "루트(/) 마운트에서 사용 중인 용량입니다. Y축 최대는 함께 표시한 서버 중 가장 큰 전체 용량입니다. 예약 블록 때문에 사용량과 남은 용량의 합은 전체 용량보다 작을 수 있습니다.",
+    "capacityMetric": "disk-total",
     "source": "직접 수집",
     "direction": "above"
   },
