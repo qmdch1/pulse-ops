@@ -17,8 +17,8 @@ for asset in ([] if '--databases-only' in sys.argv else applications):
         assert metrics[name]['state']=='ok',(asset['name'],name,'allow 5 minutes after collector restart')
     assert metrics['p50']['latest']<=metrics['p97']['latest']<=metrics['p99']['latest']
     for name in ['node-cpu','memory-host']:
-        assert metrics[name]['state']=='ok' and 0<=metrics[name]['latest']<=150,(asset['name'],name,'rebuild demo-api for the app_cpu_*/app_memory_* allocation metrics')
-    assert metrics['cpu-cores']['latest']==0.5 and metrics['memory-limit']['latest']==192,(asset['name'],'compose.test.yml limits demo-api to 0.5 CPU and 192M')
+        assert metrics[name]['state']=='ok' and 0<=metrics[name]['latest']<=150,(asset['name'],name,'rebuild backend for the app_cpu_*/app_memory_* allocation metrics')
+    assert metrics['cpu-cores']['latest']==0.5 and metrics['memory-limit']['latest']==192,(asset['name'],'compose.test.yml limits backend to 0.5 CPU and 192M')
     assert metrics['requests']['latest']>0
     assert all(s['labels']['assetId']==asset['id'] for m in metrics.values() for s in m['series'])
     assert metrics['p99-week']['state']=='missing'

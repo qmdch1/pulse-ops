@@ -55,7 +55,7 @@ func (s *Service) seed(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
-	addresses, e := net.DefaultResolver.LookupHost(ctx, "demo-api")
+	addresses, e := net.DefaultResolver.LookupHost(ctx, "backend")
 	if e != nil {
 		return e
 	}
