@@ -1,8 +1,9 @@
 # Pulse Ops development workflow
 
 - The user-designated GitHub repository is `https://github.com/qmdch1/pulse-ops.git`.
-- After each requested feature or fix passes its relevant tests, commit the verified changes and push them to this repository. Do not leave completed, tested work only in the local checkout.
-- Use `main` unless the user specifies another branch. Preserve existing history; do not force-push. Inspect and reconcile remote changes before publishing if the remote branch has advanced.
+- Before starting each task, update local `main` with `git pull --ff-only origin main`, then create a dedicated task branch from the updated `main`. Do not implement changes directly on `main`. Preserve existing local work; use a separate checkout or worktree when necessary.
+- After all applicable tests and checks pass, commit the verified work on the task branch, merge it into updated `main`, and push `main` to this repository. Do not merge unfinished or failing work, or leave completed, tested work only in the local checkout.
+- If remote `main` advances during the task, reconcile the task branch with the latest `main` and rerun affected checks before merging. Preserve existing history; do not force-push. Follow any explicit branch instructions from the user.
 - Run checks appropriate to the changed behavior. Report what was actually verified and any remaining limitations; do not describe untested integrations as complete.
 - Keep credentials, private keys, local SSH inventories, runtime data, generated binaries, and local environment files out of Git. Use placeholder example configuration for production connection settings.
 - After pushing, verify that the remote branch points to the expected commit and report the commit and repository link to the user.
