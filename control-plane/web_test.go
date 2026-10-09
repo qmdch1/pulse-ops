@@ -32,8 +32,18 @@ func TestEmbeddedStaticAuthCacheAndCompression(t *testing.T) {
 			t.Fatalf("unauthenticated %s: %d", path, w.Code)
 		}
 	}
-	if w := get("/api/health", "", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"runtime":"go"`) {
+	if w := get("/api/health", "", "", false); w.Code != 200 || !strings.Contains(w.Body.String(), `"runtime":"go"`) || len(staticBuild) != 16 || !strings.Contains(w.Body.String(), `"build":"`+staticBuild+`"`) {
 		t.Fatal("public health failed")
+	}
+	changed := map[string]staticAsset{}
+	for name, file := range staticFiles {
+		changed[name] = file
+	}
+	app := changed["app.js"]
+	app.etag = "different"
+	changed["app.js"] = app
+	if uiBuild(staticFiles) != staticBuild || uiBuild(changed) == staticBuild {
+		t.Fatal("UI build id must follow every embedded file")
 	}
 	raw := get("/assets/app.js", "", "", true)
 	compressed := get("/assets/app.js", "gzip", "", true)

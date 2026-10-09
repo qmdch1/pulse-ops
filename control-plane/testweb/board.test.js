@@ -1,6 +1,7 @@
 import {test} from './harness.js';
 import {assert} from './harness.js';
-import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricFamilies, metricRecipes, metricsForAsset, observedForAsset, relatedAssets } from '/assets/lib/board.js';
+import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricFamilies, metricRecipes, metricsForAsset, observedForAsset, relatedAssets, unselectedServers } from '/assets/lib/board.js';
+import { buildAction } from '/assets/lib/deploy.js';
 import { metrics, metricById } from '/assets/lib/catalog.js';
 import { recipeKey } from '/assets/lib/chart-layout.js';
 import { registeredIncidents } from '/assets/lib/assets.js';
@@ -232,4 +233,18 @@ test('crowded families split into one row per part and keep every selected line'
     const recipes = metricRecipes(s, ids, catalogOrder(['p50', 'p99']));
     assert.deepEqual(recipes.map(r => [r.family.title, r.title]), [['응답 시간 분포', '응답 시간 · P50'], ['응답 시간 분포', '응답 시간 · P99'], ['응답 시간 분포 · 2', '응답 시간 · P50 · 2'], ['응답 시간 분포 · 2', '응답 시간 · P99 · 2']]);
     assert.equal(recipes.flatMap(r => r.keys).length, 18);
+});
+test('a selection without any server names the servers that would fill the resource row', () => {
+    const assets = snapshot().assets;
+    assert.deepEqual(unselectedServers(assets, ['api-a', 'db']).map(a => a.id), ['host']);
+    assert.deepEqual(unselectedServers(assets, ['api-a', 'host']), []);
+    assert.deepEqual(unselectedServers(assets, []), []);
+    assert.deepEqual(unselectedServers(assets.filter(a => a.kind !== 'server'), ['api-a']), []);
+});
+test('an open page reloads after a UI redeploy but waits while the operator is busy', () => {
+    assert.equal(buildAction(null, 'aaaa', false), 'remember');
+    assert.equal(buildAction('aaaa', 'aaaa', false), 'none');
+    assert.equal(buildAction('aaaa', 'bbbb', false), 'reload');
+    assert.equal(buildAction('aaaa', 'bbbb', true), 'wait');
+    assert.equal(buildAction('aaaa', undefined, false), 'none');
 });

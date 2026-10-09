@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -31,6 +32,10 @@ type staticAsset struct {
 
 var staticOnce sync.Once
 var staticFiles map[string]staticAsset
+
+// staticBuild changes whenever any embedded UI file changes, so an open page can
+// notice a redeploy and reload instead of running the previous code.
+var staticBuild string
 
 func prepareStatic() {
 	staticFiles = map[string]staticAsset{}
@@ -57,6 +62,19 @@ func prepareStatic() {
 		staticFiles[strings.TrimPrefix(name, "web/")] = staticAsset{data, zipped.Bytes(), typ, hex.EncodeToString(sum[:16])}
 		return nil
 	})
+	staticBuild = uiBuild(staticFiles)
+}
+func uiBuild(files map[string]staticAsset) string {
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	build := sha256.New()
+	for _, name := range names {
+		build.Write([]byte(name + "\x00" + files[name].etag + "\x00"))
+	}
+	return hex.EncodeToString(build.Sum(nil)[:8])
 }
 func acceptsGzip(value string) bool {
 	for _, part := range strings.Split(value, ",") {
@@ -127,7 +145,7 @@ func (s *Service) webHandler(mode, user, password, inventory string) http.Handle
 	mux.HandleFunc("GET /{$}", serveStatic)
 	mux.HandleFunc("GET /assets/", serveStatic)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, 200, map[string]any{"status": "ok", "mode": mode, "runtime": "go", "frontend": "native-es-modules"})
+		writeJSON(w, 200, map[string]any{"status": "ok", "mode": mode, "runtime": "go", "frontend": "native-es-modules", "build": staticBuild})
 	})
 	mux.Handle("/api/control/", http.StripPrefix("/api/control", s.apiHandler()))
 	mux.HandleFunc("GET /api/monitoring", func(w http.ResponseWriter, r *http.Request) { s.monitoring(w, r, mode) })
