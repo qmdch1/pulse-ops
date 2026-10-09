@@ -30,9 +30,49 @@ test('compact charts retain values, legend visibility and opt-in settings withou
         const line = chart.querySelector('.board-legend button');
         line.click();
         assert.equal(line.getAttribute('aria-pressed'), 'false');
+        line.focus();
+        const updated = structuredClone(snapshot);
+        updated.metrics[0].series[0].points[0].value = 21;
+        grid.update(updated, true);
+        assert.equal(chart.querySelector('.board-legend button'), line);
+        assert.equal(document.activeElement, line);
+        assert.equal(line.getAttribute('aria-pressed'), 'false');
+        assert.equal(line.querySelector('strong').textContent.trim(), '21 %');
         line.click();
         assert.equal(line.getAttribute('aria-pressed'), 'true');
         chart.querySelector('[data-detail]').click();
         assert.deepEqual(opened, {metric: 'node-cpu', ids: ['ui-a', 'ui-b']});
+    } finally {grid.destroy(); root.remove()}
+});
+
+test('selecting a merge target combines immediately and the header undo restores every series', async () => {
+    const snapshot = {
+        start: 100, end: 115, step: 15,
+        assets: [{id: 'merge-ui-a', name: 'Server A', kind: 'server', enabled: true}],
+        metrics: ['node-cpu', 'memory-host'].map(id => ({id, series: [{labels: {assetId: 'merge-ui-a', name: 'Server A'}, points: [{time: 115, value: id === 'node-cpu' ? 12 : 37}]}]})),
+    };
+    const root = document.createElement('div');
+    document.querySelector('main').append(root);
+    const grid = new ChartGrid(root, dashboardRecipes(snapshot, ['merge-ui-a']), snapshot, () => {});
+    try {
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const source = root.querySelector('article');
+        source.querySelector('.chart-grip').click();
+        const picker = source.querySelector('.chart-merge-picker');
+        assert.ok(!picker.hidden);
+        assert.equal(picker.querySelector('select'), null);
+        picker.querySelector('.chart-target').click();
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        assert.equal(root.querySelectorAll('article').length, 1);
+        const combined = root.querySelector('article');
+        assert.deepEqual([...combined.querySelectorAll('.board-legend strong')].map(node => node.textContent.trim()), ['37 %', '12 %']);
+        const undo = combined.querySelector('[data-undo]');
+        assert.ok(!undo.hidden);
+        assert.equal(document.activeElement, undo);
+        undo.click();
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        assert.equal(root.querySelectorAll('article').length, 2);
+        assert.deepEqual([...root.querySelectorAll('.board-legend strong')].map(node => node.textContent.trim()), ['12 %', '37 %']);
+        assert.ok([...root.querySelectorAll('[data-undo]')].every(button => button.hidden));
     } finally {grid.destroy(); root.remove()}
 });

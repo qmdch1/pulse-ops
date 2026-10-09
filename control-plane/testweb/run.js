@@ -7,6 +7,7 @@ import './board.test.js';
 import './chart-layout.test.js';
 import './chart-scale.test.js';
 import './chart-interface.test.js';
+import './dashboard-controls.test.js';
 import {esc} from '/assets/ui.js';
 import {scopeSnapshot} from '/assets/lib/assets.js';
 import {ruleState} from '/assets/lib/rule-catalog.js';
