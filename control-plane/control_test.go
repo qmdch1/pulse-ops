@@ -203,7 +203,7 @@ func TestContainerShareUsesCgroupAllocation(t *testing.T) {
 		t.Fatalf("unlimited container %v %v", own, ok)
 	}
 	// cgroup v1: the quota caps the usable cores and cpuacct counts nanoseconds.
-	own, ok = containerShare(map[string][]string{"v1.mem.limit": {"134217728"}, "v1.mem.usage": {"67108864"}, "v1.mem.inactive": {"0"}, "v1.cpu.quota": {"200000"}, "v1.cpu.period": {"100000"}, "v1.cpu.usage": {"3000000000"}, "nproc": {"4"}}, map[string]float64{}, previous, totalKB)
+	own, ok = containerShare(map[string][]string{"v1.mem.limit": {"134217728"}, "mem.current": {"67108864"}, "mem.inactive": {"0"}, "v1.cpu.quota": {"200000"}, "v1.cpu.period": {"100000"}, "v1.cpu.usage": {"3000000000"}, "nproc": {"4"}}, map[string]float64{}, previous, totalKB)
 	if !ok || own["memory-host"] != 50 || own["memory-limit"] != 128 || own["cpu-cores"] != 2 || !near(own["node-cpu"], 10) {
 		t.Fatalf("v1 container %v %v", own, ok)
 	}

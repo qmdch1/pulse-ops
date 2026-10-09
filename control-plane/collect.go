@@ -165,7 +165,7 @@ func ratio(values map[string]float64, id string, numerator, denominator float64)
 }
 func parseNumber(s string) float64 { v, _ := strconv.ParseFloat(strings.TrimSpace(s), 64); return v }
 
-const linuxMetrics = `set -e; LC_ALL=C; echo '__CPU__'; head -n 1 /proc/stat; echo '__MEM__'; cat /proc/meminfo; echo '__LOAD__'; cat /proc/loadavg; echo '__DISK__'; df -Pk /; echo '__NET__'; cat /proc/net/dev; echo '__UPTIME__'; cat /proc/uptime; echo '__NCPU__'; grep -c '^cpu[0-9]' /proc/stat; echo '__BOOT__'; cat /proc/sys/kernel/random/boot_id; echo '__CGROUP__'; set +e; r() { [ -r "$2" ] && echo "$1 $(head -n 1 "$2")"; }; r mem.max /sys/fs/cgroup/memory.max; r mem.current /sys/fs/cgroup/memory.current; r cpu.max /sys/fs/cgroup/cpu.max; r cpuset /sys/fs/cgroup/cpuset.cpus.effective; r v1.mem.limit /sys/fs/cgroup/memory/memory.limit_in_bytes; r v1.mem.usage /sys/fs/cgroup/memory/memory.usage_in_bytes; r v1.cpu.quota /sys/fs/cgroup/cpu/cpu.cfs_quota_us; r v1.cpu.period /sys/fs/cgroup/cpu/cpu.cfs_period_us; r v1.cpu.usage /sys/fs/cgroup/cpuacct/cpuacct.usage; awk '$1=="usage_usec"{print "cpu.usage_usec",$2}' /sys/fs/cgroup/cpu.stat 2>/dev/null; awk '$1=="inactive_file"{print "mem.inactive",$2} $1=="total_inactive_file"{print "v1.mem.inactive",$2}' /sys/fs/cgroup/memory.stat /sys/fs/cgroup/memory/memory.stat 2>/dev/null; if [ -f /.dockerenv ] || [ -f /run/.containerenv ] || grep -qE 'docker|kubepods|containerd|lxc|libpod' /proc/1/cgroup 2>/dev/null; then echo container 1; fi; p=$$; a=0; while [ "$p" -gt 1 ] 2>/dev/null; do k=$(awk '/^(RssAnon|VmPTE):/{s+=$2} END{print s+0}' /proc/$p/status 2>/dev/null); a=$((a+${k:-0})); p=$(awk '/^PPid:/{print $2}' /proc/$p/status 2>/dev/null); done; echo session.anon_kb $a; echo nproc $(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN); true`
+const linuxMetrics = `LC_ALL=C; m=; i=; for f in /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory/memory.usage_in_bytes; do [ -z "$m" ] && [ -r "$f" ] && read -r m < "$f"; done; for f in /sys/fs/cgroup/memory.stat /sys/fs/cgroup/memory/memory.stat; do [ -z "$i" ] && [ -r "$f" ] && while read -r k v; do case $k in inactive_file|total_inactive_file) i=$v;; esac; done < "$f"; done; p=$$; a=0; while [ "$p" -gt 1 ] 2>/dev/null && [ -r /proc/$p/status ]; do n=0; while read -r k v rest; do case $k in RssAnon:|VmPTE:) a=$((a+v));; PPid:) n=$v;; esac; done < /proc/$p/status; p=$n; done; set -e; echo '__CPU__'; head -n 1 /proc/stat; echo '__MEM__'; cat /proc/meminfo; echo '__LOAD__'; cat /proc/loadavg; echo '__DISK__'; df -Pk /; echo '__NET__'; cat /proc/net/dev; echo '__UPTIME__'; cat /proc/uptime; echo '__NCPU__'; grep -c '^cpu[0-9]' /proc/stat; echo '__BOOT__'; cat /proc/sys/kernel/random/boot_id; echo '__CGROUP__'; set +e; r() { [ -r "$2" ] && echo "$1 $(head -n 1 "$2")"; }; r mem.max /sys/fs/cgroup/memory.max; r cpu.max /sys/fs/cgroup/cpu.max; r cpuset /sys/fs/cgroup/cpuset.cpus.effective; r v1.mem.limit /sys/fs/cgroup/memory/memory.limit_in_bytes; r v1.cpu.quota /sys/fs/cgroup/cpu/cpu.cfs_quota_us; r v1.cpu.period /sys/fs/cgroup/cpu/cpu.cfs_period_us; r v1.cpu.usage /sys/fs/cgroup/cpuacct/cpuacct.usage; awk '$1=="usage_usec"{print "cpu.usage_usec",$2}' /sys/fs/cgroup/cpu.stat 2>/dev/null; [ -n "$m" ] && echo mem.current $m; [ -n "$i" ] && echo mem.inactive $i; if [ -f /.dockerenv ] || [ -f /run/.containerenv ] || grep -qE 'docker|kubepods|containerd|lxc|libpod' /proc/1/cgroup 2>/dev/null; then echo container 1; fi; echo session.anon_kb $a; echo nproc $(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN); true`
 
 func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[string]float64, map[string]float64, error) {
 	connection, _, e := s.sshConnect(ctx, record.Asset.ID, false)
@@ -405,12 +405,9 @@ func containerShare(cgroup map[string][]string, raw map[string]float64, previous
 	if !limited {
 		limit = totalMemKB * 1024
 	}
+	// Read first in the command with shell builtins, before its own subprocesses add kernel memory.
 	used, ok := value("mem.current")
 	inactive, _ := value("mem.inactive")
-	if !ok {
-		used, ok = value("v1.mem.usage")
-		inactive, _ = value("v1.mem.inactive")
-	}
 	session, _ := value("session.anon_kb")
 	if ok && limit > 0 {
 		own["memory-host"] = 100 * math.Max(0, used-inactive-session*1024) / limit
