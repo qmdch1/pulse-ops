@@ -1,7 +1,7 @@
 import {metrics,metricById} from './lib/catalog.js';
 import {assetLabels,statusLabels,scopeSnapshot,registeredIncidents} from './lib/assets.js';
 import {eventRules,ruleState,ruleById} from './lib/rule-catalog.js';
-import {groupEvents,relatedAssets,eventMetricIds,metricsForAsset,observedForAsset,comparisonLines,boardSelection,metricRecipes as recipesForMetrics,dashboardRecipes,unselectedServers} from './lib/board.js';
+import {groupEvents,relatedAssets,eventMetricIds,metricsForAsset,observedForAsset,comparisonLines,boardSelection,metricRecipes as recipesForMetrics,dashboardRecipes,unselectedServers,withDockerHosts} from './lib/board.js';
 import {buildAction} from './lib/deploy.js';
 import {infrastructurePicker,bindInfrastructurePicker} from './lib/dashboard-controls.js';
 import {enter} from './lib/motion.js';
@@ -18,7 +18,8 @@ const main=$('#main'),worker=new Worker('/assets/worker.js',{type:'module'});
 const pill=(value,label)=>`<span class="health-label ${esc(value)}">${esc(label||statusLabels[value]||value)}</span>`;
 const empty=message=>`<div class="empty-state">${esc(message)}</div>`;
 const pageHeading=(eyebrow,title,description,actions='')=>`<div class="page-heading"><div>${eyebrow?`<div class="eyebrow">${eyebrow}</div>`:''}<h1 class="sr-only">${title}</h1>${description?`<p>${description}</p>`:''}</div><div class="heading-actions">${actions}</div></div>`;
-const assets=()=>snapshot?.assets||[];
+// Registered infrastructure only; derived Docker hosts appear on graphs and events, not in management.
+const assets=()=>(snapshot?.assets||[]).filter(a=>!a.virtual);
 const currentSelection=()=>boardSelection(selection,assets());
 const persist=()=>savePreference('pulse-dashboard-board-v1',{selectedIds:currentSelection()});
 function notify(message){const n=$('#notice');n.textContent=message;n.hidden=!message}
@@ -35,10 +36,10 @@ async function terminal(asset){const {openTerminal}=await import('./terminal.js'
 async function assetAction(id,action,button){button.disabled=true;try{await request(`assets/${id}/${action}`,'POST');layoutKey='';refresh()}catch(e){notify(e.message)}finally{button.disabled=false}}
 function showAsset(asset){const local=[];const relevant=incidents.filter(i=>i.assetId===asset.id);const d=dialog(asset.name,`${assetLabels[asset.kind]} · ${asset.address||'주소 미입력'}`,`<div class="detail-actions">${pill(asset.status)}<button class="filter-button" data-focus>대시보드에서 보기</button><button class="filter-button" data-edit>연결 정보</button><button class="filter-button" data-terminal>터미널</button><button class="filter-button" data-diagnose>연결 진단</button></div>${relevant.length?`<div class="detail-events">${relevant.map(i=>`<button class="event-line" data-event="${esc(i.ruleId)}">${pill(i.severity,i.status==='pending'?'지속 시간 확인 중':'발생')}<strong>${esc(i.title)}</strong><span>${esc(i.value)} ${esc(i.unit)}</span>${icon('arrow')}</button>`).join('')}</div>`:''}${asset.message?`<p class="muted-text">${esc(asset.message)}</p>`:''}<div class="board-chart-grid"></div>`,{className:'wide-dialog',onClose:()=>{local.forEach(g=>g.destroy());detailUpdate=null}});mountCharts($('.board-chart-grid',d),metricRecipes([asset.id],metricsForAsset(snapshot,asset).filter(m=>observedForAsset(snapshot,m.id,asset.id))),local);detailUpdate=()=>{const live=snapshot.assets.find(a=>a.id===asset.id);if(live){const badge=$('.detail-actions>.health-label',d);badge.className='health-label '+live.status;badge.textContent=statusLabels[live.status]||live.status}$$('[data-event]',d).forEach(button=>{const current=incidents.find(i=>i.assetId===asset.id&&i.ruleId===button.dataset.event);button.hidden=!current;if(current)button.querySelector('span:nth-last-child(2)').textContent=current.value+' '+current.unit})};$('[data-focus]',d).onclick=()=>{d.close();selection=[asset.id];persist();navigate('dashboard')};$('[data-edit]',d).onclick=()=>edit(asset);$('[data-terminal]',d).onclick=()=>terminal(asset);$('[data-diagnose]',d).onclick=()=>openDiagnostic(asset);$$('[data-event]',d).forEach(b=>b.onclick=()=>{focusEvent=b.dataset.event;d.close();openEvent(focusEvent)})}
 function bindAssets(root=main){$$('[data-edit]',root).forEach(b=>b.onclick=()=>edit(assets().find(a=>a.id===b.dataset.edit)));$$('[data-asset]',root).forEach(b=>b.onclick=()=>showAsset(assets().find(a=>a.id===b.dataset.asset)));$$('[data-terminal]',root).forEach(b=>b.onclick=()=>terminal(assets().find(a=>a.id===b.dataset.terminal)));$$('[data-action]',root).forEach(b=>b.onclick=()=>assetAction(b.dataset.id,b.dataset.action,b));$$('[data-add]',root).forEach(b=>b.onclick=()=>edit());$$('[data-candidates]',root).forEach(b=>b.onclick=candidates)}
-function assetNames(ids){const names=ids.map(id=>assets().find(a=>a.id===id)?.name).filter(Boolean);return names.slice(0,2).join(' · ')+(names.length>2?` 외 ${names.length-2}개`:'')}
+function assetNames(ids){const names=ids.map(id=>snapshot?.assets?.find(a=>a.id===id)?.name).filter(Boolean);return names.slice(0,2).join(' · ')+(names.length>2?` 외 ${names.length-2}개`:'')}
 function openEvent(id){focusEvent=id;eventTab='active';if(page==='events')render(true);else navigate('events')}
 function renderDashboard(){
- const ids=currentSelection(),groups=groupEvents(incidents.filter(i=>!i.assetId||ids.includes(i.assetId))),missing=unselectedServers(assets(),ids);
+ const ids=currentSelection(),shown=withDockerHosts(snapshot.assets,ids),groups=groupEvents(incidents.filter(i=>!i.assetId||shown.includes(i.assetId))),missing=unselectedServers(assets(),ids);
  main.innerHTML=`<h1 class="sr-only">대시보드</h1><div id="saved-views" class="saved-views"></div><div class="monitoring-board">
  ${infrastructurePicker(assets(),ids,search)}
  ${groups.length?`<div class="dashboard-alerts">${groups.map(g=>`<button class="dashboard-alert ${esc(g.severity)}" data-event="${esc(g.id)}">${pill(g.severity,g.incidents.every(i=>i.status==='pending')?'확인 중':g.severity==='critical'?'긴급':g.severity==='warning'?'주의':'안내')}<strong>${esc(g.title)}</strong><span>${esc(assetNames(g.assetIds))}</span>${icon('arrow',14)}</button>`).join('')}</div>`:''}
@@ -47,7 +48,7 @@ function renderDashboard(){
  $$('[data-event]',main).forEach(b=>b.onclick=()=>openEvent(b.dataset.event));
  bindInfrastructurePicker(main,assets(),currentSelection,ids=>{selection=ids;persist();render(true)},query=>search=query);
  $('[data-add-servers]',main)?.addEventListener('click',()=>{selection=[...new Set([...currentSelection(),...missing.map(a=>a.id)])];persist();render(true)});
- if(ids.length)mountCharts($('#all-charts'),dashboardRecipes(snapshot,ids));
+ if(ids.length)mountCharts($('#all-charts'),dashboardRecipes(snapshot,shown));
  void mountViews($('#saved-views'),()=>({assetIds:currentSelection(),range:Number($('#time-range').value),refreshSeconds}),applyView);
 }
 

@@ -1,7 +1,7 @@
 import {comparisonLines,chartRows,chartGroups} from './lib/board.js';
 import {recipeKey,readLayout,mergeLayout,activeGroups,removeGroup,refreshPeriod,refreshDue,familyColumns} from './lib/chart-layout.js';
 import {formatNumber} from './lib/rules.js';
-import {axisScale,sharedScale,formatAxisTick,axisRangeLabel} from './lib/chart-scale.js';
+import {axisScale,sharedScale,formatAxisTick,axisRangeLabel,humanize} from './lib/chart-scale.js';
 import {metricById} from './lib/catalog.js';
 import {enter,valueChanged} from './lib/motion.js';
 import {esc,icon,shortTime,fullTime,preference,savePreference} from './ui.js';
@@ -9,7 +9,7 @@ import {esc,icon,shortTime,fullTime,preference,savePreference} from './ui.js';
 const palette=['#b5a1ff','#63d9bd','#6dbafb','#f3bc77','#ef8eae','#cbd376','#c39beb','#71cad2'];
 const format=v=>v===null||v===undefined?'—':formatNumber(v);
 // Usage lines read against their own capacity: "20.7 / 1,006.9 GiB".
-const unitOf=line=>line.capacity?`/ ${format(line.capacity)} ${line.unit}`:line.unit;
+const unitOf=line=>line.capacity?`/ ${format(line.capacity)} ${line.unit}`:line.allocation?`${line.unit} · ${humanize(line.allocation,line.allocationUnit)} 기준`:line.unit;
 const clockFormat=new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Seoul'});
 const groups=new Set();
 const layout=readLayout(preference('pulse-chart-layout-v1',{}));

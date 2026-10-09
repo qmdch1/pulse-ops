@@ -33,7 +33,7 @@ const sources = {
     redis: ['Redis exporter'], http: ['Blackbox exporter'],
 };
 export function metricsForAsset(snapshot, asset) {
-    const directProfiles = { server: ['uptime', 'cpu', 'disk-total', 'disk-used', 'disk-free'], redis: ['redis-used', 'redis-clients', 'redis-commands'] };
+    const directProfiles = { server: ['uptime', 'cpu', 'cpu-cores', 'memory-limit', 'disk-total', 'disk-used', 'disk-free'], redis: ['redis-used', 'redis-clients', 'redis-commands'] };
     const ids = new Set([...(databaseProfiles[asset.kind] || contextMetrics[asset.kind] || []), ...(directProfiles[asset.kind] || []), 'targets', 'targets-down', 'scrape-duration', 'scrape-age']);
     for (const m of snapshot.metrics)
         if (m.series.some(s => s.labels.assetId === asset.id && s.points.some(p => p.value !== null)))
@@ -120,8 +120,12 @@ export function dashboardRecipes(snapshot, ids) {
 }
 // CPU, RAM and disk at the top are server metrics: the servers a selection leaves out entirely.
 export function unselectedServers(assets, ids) {
-    const servers = assets.filter(asset => asset.kind === 'server');
+    const servers = assets.filter(asset => asset.kind === 'server' && !asset.virtual);
     return ids.length && !servers.some(asset => ids.includes(asset.id)) ? servers : [];
+}
+// A Docker host is not picked by itself: it follows the containers it runs.
+export function withDockerHosts(assets, ids) {
+    return [...ids, ...assets.filter(asset => asset.virtual && asset.members?.some(id => ids.includes(id)) && !ids.includes(asset.id)).map(asset => asset.id)];
 }
 export function relatedAssets(snapshot, rootIds) {
     const byId = new Map(snapshot.assets?.map(a => [a.id, a]) || []), seen = new Set(), pending = [...rootIds];
@@ -158,13 +162,16 @@ export function comparisonLines(snapshot, ids, metricIds) {
         if (!metric)
             continue;
         const totals = metric.capacityMetric && snapshot.metrics.find(m => m.id === metric.capacityMetric)?.series;
+        const allocations = metric.allocationMetric && snapshot.metrics.find(m => m.id === metric.allocationMetric)?.series;
         for (const series of snapshot.metrics.find(m => m.id === id)?.series || []) {
             if (!allowed.has(series.labels.assetId) || !series.points.some(p => p.value !== null))
                 continue;
             const assetName = series.labels.name || series.labels.assetId;
             // A usage line carries its own latest capacity so the axis can top out at the largest one.
             const capacity = totals?.find(s => s.labels.assetId === series.labels.assetId)?.points.findLast(p => Number.isFinite(p.value))?.value;
-            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points, ...(capacity > 0 ? { capacity } : {}) });
+            // A percentage also names what it is measured against: a container's allocation or the host's total.
+            const allocation = allocations?.find(s => s.labels.assetId === series.labels.assetId)?.points.findLast(p => Number.isFinite(p.value))?.value;
+            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points, ...(capacity > 0 ? { capacity } : {}), ...(allocation > 0 ? { allocation, allocationUnit: metricById.get(metric.allocationMetric)?.unit } : {}) });
         }
     }
     return lines;

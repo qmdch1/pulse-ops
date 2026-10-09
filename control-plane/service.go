@@ -33,6 +33,7 @@ type Service struct {
 	busy      map[string]bool
 	previous  map[string]previousSample
 	processes map[string]processSample
+	hosts     map[string]*dockerHost
 	history   map[string][]previousSample
 	retry     map[string]time.Time
 	failures  map[string]int
@@ -40,7 +41,7 @@ type Service struct {
 }
 
 func newService(store *Store, origins []string) *Service {
-	s := &Service{store: store, origins: map[string]bool{}, tickets: map[string]terminalTicket{}, busy: map[string]bool{}, previous: map[string]previousSample{}, processes: map[string]processSample{}, history: map[string][]previousSample{}, retry: map[string]time.Time{}, failures: map[string]int{}, slots: make(chan struct{}, 4)}
+	s := &Service{store: store, origins: map[string]bool{}, tickets: map[string]terminalTicket{}, busy: map[string]bool{}, previous: map[string]previousSample{}, processes: map[string]processSample{}, hosts: map[string]*dockerHost{}, history: map[string][]previousSample{}, retry: map[string]time.Time{}, failures: map[string]int{}, slots: make(chan struct{}, 4)}
 	for _, origin := range origins {
 		if u, e := url.Parse(strings.TrimSpace(origin)); e == nil && u.Host != "" {
 			s.origins[u.Scheme+"://"+u.Host] = true

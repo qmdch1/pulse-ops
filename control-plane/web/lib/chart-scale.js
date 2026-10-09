@@ -29,6 +29,12 @@ export function sharedScale(scales, unit) {
     return {low, high, ...axisUnit(unit, Math.max(Math.abs(low), Math.abs(high)))};
 }
 
+// One amount in a readable unit: 15,857 MiB → "15.5 GiB", 0.5 코어 → "0.5 코어".
+export function humanize(value, unit) {
+    const {divisor, displayUnit} = axisUnit(unit, Math.abs(value)), scaled = value / divisor;
+    return `${new Intl.NumberFormat('en-US', {maximumFractionDigits: Math.abs(scaled) < 10 ? 2 : 1}).format(scaled)} ${displayUnit}`.trim();
+}
+
 function axisUnit(unit, extent) {
     const families = {
         ms: [[86400000, '일'], [3600000, '시간'], [60000, '분'], [1000, '초']],
