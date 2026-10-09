@@ -210,7 +210,7 @@ test('dashboard starts with CPU, RAM and disk, then the latency row, then the re
     const s = snapshot(['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory', 'node-cpu', 'memory-host', 'disk-used', 'db-probe'].map(id => metric(id, { 'api-a': 1, host: 2, db: 3 })));
     const recipes = dashboardRecipes(s, ['api-a', 'host', 'db']);
     assert.deepEqual(recipes.slice(0, 8).map(r => r.family?.row), ['resources:0', 'resources:0', 'resources:0', 'latency:0', 'latency:0', 'latency:0', 'latency:0', 'latency:0']);
-    assert.deepEqual(recipes.slice(0, 3).map(r => [r.family.label, r.assetIds]), [['CPU', ['host']], ['RAM', ['host']], ['디스크', ['host']]]);
+    assert.deepEqual(recipes.slice(0, 3).map(r => [r.family.label, r.assetIds]), [['CPU', ['api-a', 'host']], ['RAM', ['api-a', 'host']], ['디스크', ['host']]]);
     assert.deepEqual(recipes.slice(8).map(r => [r.metricIds[0], r.family?.row]), [['requests', 'traffic:0'], ['errors', 'traffic:0'], ['cpu', 'process:0'], ['memory', 'process:0'], ['db-probe', undefined]]);
 });
 const dbAssets = () => [asset('pg', 'postgres'), asset('my', 'mysql'), asset('cache', 'redis')];
@@ -263,6 +263,14 @@ test('server-only and HTTP selections keep partnerless metrics as ordinary chart
     const s = snapshot(['node-cpu', 'cpu', 'probe-latency'].map(id => metric(id, { host: 1, web: 2 })));
     s.assets.push(asset('web', 'http'));
     assert.deepEqual(dashboardRecipes(s, ['host', 'web']).map(r => [r.metricIds[0], r.family]), [['node-cpu', undefined], ['cpu', undefined], ['probe-latency', undefined]]);
+});
+test('application containers join the CPU and RAM row measured against their own allocation', () => {
+    const s = snapshot([metric('node-cpu', { 'api-a': 12, 'api-b': 30, host: 3 }), metric('memory-host', { 'api-a': 24, host: 45 }), metric('cpu-cores', { 'api-a': 0.5, 'api-b': 0.5, host: 12 }), metric('memory-limit', { 'api-a': 192, host: 15857 }), metric('cpu', { 'api-a': 9 }), metric('memory', { 'api-a': 40 })]);
+    const recipes = dashboardRecipes(s, ['api-a', 'api-b', 'host']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label, r.assetIds]), [['node-cpu', 'CPU', ['api-a', 'api-b', 'host']], ['memory-host', 'RAM', ['api-a', 'host']], ['cpu', undefined, ['api-a']], ['memory', undefined, ['api-a']]]);
+    assert.deepEqual(comparisonLines(s, ['api-a', 'api-b'], ['node-cpu', 'memory-host']).map(l => [l.key, l.allocation, l.allocationUnit]), [['node-cpu:api-a', 0.5, '코어'], ['node-cpu:api-b', 0.5, '코어'], ['memory-host:api-a', 192, 'MiB']]);
+    // An application without the optional allocation metrics keeps only process CPU and RSS.
+    assert.deepEqual(dashboardRecipes(snapshot([metric('cpu', { 'api-b': 9 }), metric('memory', { 'api-b': 40 })]), ['api-b']).map(r => [r.metricIds[0], r.family]), [['cpu', undefined], ['memory', undefined]]);
 });
 test('server dashboard shows CPU, process CPU, RAM and one disk usage chart', () => {
     const s = snapshot(['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'uptime', 'swap'].map(id => metric(id, { host: 10 })));

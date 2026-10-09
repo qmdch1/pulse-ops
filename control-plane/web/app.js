@@ -43,7 +43,7 @@ function renderDashboard(){
  main.innerHTML=`<h1 class="sr-only">대시보드</h1><div id="saved-views" class="saved-views"></div><div class="monitoring-board">
  ${infrastructurePicker(assets(),ids,search)}
  ${groups.length?`<div class="dashboard-alerts">${groups.map(g=>`<button class="dashboard-alert ${esc(g.severity)}" data-event="${esc(g.id)}">${pill(g.severity,g.incidents.every(i=>i.status==='pending')?'확인 중':g.severity==='critical'?'긴급':g.severity==='warning'?'주의':'안내')}<strong>${esc(g.title)}</strong><span>${esc(assetNames(g.assetIds))}</span>${icon('arrow',14)}</button>`).join('')}</div>`:''}
- ${missing.length?`<div class="resource-hint">${icon('server')}<span>맨 위 기본 리소스(CPU·RAM·디스크)는 서버 지표입니다. 지금 선택에는 서버가 없습니다.</span><button class="filter-button" data-add-servers>서버 ${missing.length}대 함께 보기</button></div>`:''}
+ ${missing.length?`<div class="resource-hint">${icon('server')}<span>맨 위 기본 리소스의 디스크와 서버 CPU·RAM은 서버 지표입니다. 지금 선택에는 서버가 없습니다.</span><button class="filter-button" data-add-servers>서버 ${missing.length}대 함께 보기</button></div>`:''}
  <div class="board-chart-grid" id="all-charts">${ids.length?'':empty('인프라를 선택하세요.')}</div></div>`;
  $$('[data-event]',main).forEach(b=>b.onclick=()=>openEvent(b.dataset.event));
  bindInfrastructurePicker(main,assets(),currentSelection,ids=>{selection=ids;persist();render(true)},query=>search=query);

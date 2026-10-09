@@ -219,6 +219,45 @@ func TestContainerShareUsesCgroupAllocation(t *testing.T) {
 		}
 	}
 }
+func TestApplicationReportsContainerAllocation(t *testing.T) {
+	serve := func(body string) string {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
+		t.Cleanup(server.Close)
+		return server.URL
+	}
+	s := newService(testStore(t), nil)
+	// A 0.5 core, 192 MiB container using 48 MiB without page cache.
+	record := StoredAsset{Asset: Asset{ID: "api", Kind: "application", Address: serve("# TYPE app_cpu_limit_cores gauge\napp_cpu_limit_cores 0.5\n# TYPE app_cpu_usage_seconds_total counter\napp_cpu_usage_seconds_total 12\n# TYPE app_memory_limit_bytes gauge\napp_memory_limit_bytes 201326592\n# TYPE app_memory_usage_bytes gauge\napp_memory_usage_bytes 50331648\n")}}
+	values, raw, e := s.collectApplication(context.Background(), record)
+	if e != nil || values["cpu-cores"] != 0.5 || values["memory-limit"] != 192 || values["memory-host"] != 25 || raw["cpu_seconds"] != 12 {
+		t.Fatalf("allocation %v %v %v", values, raw, e)
+	}
+	if _, ok := values["node-cpu"]; ok {
+		t.Fatal("CPU reported without a previous counter")
+	}
+	// 1 s of container CPU in 10 s is 0.1 core = 20 % of the 0.5 core allocation.
+	s.previous["api"] = previousSample{At: time.Now().Add(-10 * time.Second), Values: map[string]float64{"cpu_seconds": 11}}
+	if values, _, _ = s.collectApplication(context.Background(), record); values["node-cpu"] < 19.9 || values["node-cpu"] > 20.1 {
+		t.Fatalf("container CPU %v", values["node-cpu"])
+	}
+	s.previous["api"] = previousSample{At: time.Now().Add(-10 * time.Second), Values: map[string]float64{"cpu_seconds": 13}}
+	values, _, _ = s.collectApplication(context.Background(), record)
+	if _, ok := values["node-cpu"]; ok {
+		t.Fatalf("a restarted container's counter was reported: %v", values["node-cpu"])
+	}
+	// Without the optional metrics nothing is invented; process CPU and RSS stay as they were.
+	plain := StoredAsset{Asset: Asset{ID: "plain", Kind: "application", Address: serve("# TYPE app_process_cpu_percent gauge\napp_process_cpu_percent 7\n# TYPE process_resident_memory_bytes gauge\nprocess_resident_memory_bytes 1048576\n")}}
+	s.previous["plain"] = previousSample{At: time.Now().Add(-10 * time.Second), Values: map[string]float64{"cpu_seconds": 1}}
+	values, _, _ = s.collectApplication(context.Background(), plain)
+	for _, id := range []string{"node-cpu", "memory-host", "cpu-cores", "memory-limit"} {
+		if _, ok := values[id]; ok {
+			t.Fatalf("%s invented: %v", id, values)
+		}
+	}
+	if values["cpu"] != 7 || values["memory"] != 1 {
+		t.Fatalf("process values %v", values)
+	}
+}
 func TestDockerHostGroupsContainersOfOneKernel(t *testing.T) {
 	if dockerHostID("4f0c1a2b-9d8e-4c7f-a1b2-c3d4e5f60718") != "dockerhost-4f0c1a2b9d8e" || dockerHostID("not-a-boot-id") != "" || dockerHostID("") != "" {
 		t.Fatal("host id must come from a hex boot id only")

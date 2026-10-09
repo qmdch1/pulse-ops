@@ -108,7 +108,8 @@ export function arrangeFamilies(recipes) {
 // The overview is deliberately small. Full collection and event evidence use
 // metricsForAsset/eventMetricIds and never inherit this display filter.
 export const dashboardMetrics = {
-    application: ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
+    // CPU and RAM against the container's allocation when the application reports it.
+    application: ['node-cpu', 'memory-host', 'requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
     server: ['node-cpu', 'cpu', 'memory-host', 'disk-used', 'network-in', 'network-out'],
     postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
     mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
@@ -129,7 +130,7 @@ export function dashboardRecipes(snapshot, ids) {
         return owners.length ? metricRecipes(snapshot, owners.map(asset => asset.id), [metricById.get(id)]).map(recipe => ({...recipe, subtitle: undefined})) : [];
     }));
 }
-// CPU, RAM and disk at the top are server metrics: the servers a selection leaves out entirely.
+// Disk and the servers' own CPU/RAM at the top come from servers: the servers a selection leaves out entirely.
 export function unselectedServers(assets, ids) {
     const servers = assets.filter(asset => asset.kind === 'server' && !asset.virtual);
     return ids.length && !servers.some(asset => ids.includes(asset.id)) ? servers : [];

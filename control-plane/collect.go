@@ -858,6 +858,24 @@ func (s *Service) collectApplication(ctx context.Context, record StoredAsset) (m
 			ratio(values, id, n, d)
 		}
 	}
+	// Optional container allocation, the same measure as an SSH container's cgroup
+	// share: RAM over the memory limit and container CPU time over the allocated cores.
+	cores, coresOK := gauge("app_cpu_limit_cores")
+	if coresOK && cores > 0 {
+		values["cpu-cores"] = cores
+	}
+	if limit, ok := gauge("app_memory_limit_bytes"); ok && limit > 0 {
+		values["memory-limit"] = limit / 1024 / 1024
+		if used, ok := gauge("app_memory_usage_bytes"); ok {
+			values["memory-host"] = 100 * math.Max(0, used) / limit
+		}
+	}
+	if v, ok := gauge("app_cpu_usage_seconds_total"); ok {
+		raw["cpu_seconds"] = v
+		if rate, ok := deltaRate(raw, s.previousFor(record.Asset.ID), "cpu_seconds"); ok && coresOK && cores > 0 {
+			values["node-cpu"] = 100 * rate / cores
+		}
+	}
 	for id, def := range map[string]struct {
 		Name    string
 		Seconds float64
