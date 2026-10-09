@@ -5,10 +5,33 @@ import runpy
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = runpy.run_path(str(ROOT / 'scripts' / 'render-architecture.py'))
-Svg, THEMES, shown, anim, T = (BASE[name] for name in ('Svg', 'THEMES', 'shown', 'anim', 'T'))
+Svg, THEMES, shown, anim, legs = (BASE[name] for name in ('Svg', 'THEMES', 'shown', 'anim', 'legs'))
+EASE_IN, EASE_OUT, LINEAR = (BASE[name] for name in ('EASE_IN', 'EASE_OUT', 'LINEAR'))
 W, H = 1200, 690
-PHASES = ((.3, 6, 'violet', '① 정상 요청'), (6.4, 12, 'red', '② 5xx 집계'),
-          (12.4, 20, 'blue', '③ /metrics 수집'), (20.4, 26.5, 'green', '④ 지표 계산'))
+
+# Same rule as the architecture animation: the next leg leaves the moment the
+# previous one arrives, and travel times alone set the pace.
+READ = 1.3  # time to read the counter message after a request
+
+
+def request(at):
+    """request → dispatch → response → return; the middleware counts as the response passes back."""
+    trip = legs(at, 0.9, 0.8, 0.6, 0.7)
+    return trip, legs(trip[2][1], 0.7)[0]
+
+
+OK_TRIP, OK_COUNT = request(0.4)
+P2 = OK_COUNT[1] + READ + 0.1
+ERR_TRIP, ERR_COUNT = request(P2 + 0.2)
+P3 = ERR_COUNT[1] + READ + 0.1
+A_GET, A_TEXT, B_GET, B_TEXT = legs(P3 + 0.2, 1.2, 1.2, 1.2, 1.2)
+P4 = B_TEXT[1] + 0.6
+COMPUTE, DRAW = legs(P4 + 0.2, 0.6, 0.6)
+LINES = (DRAW[1], DRAW[1] + 1.2)
+T = round(LINES[1] + 1.2, 2)
+anim.__globals__['T'] = T  # the shared helpers read this file's own loop length (runpy returns a copy)
+PHASES = ((0.3, P2, 'violet', '① 정상 요청'), (P2, P3, 'red', '② 5xx 집계'),
+          (P3, P4, 'blue', '③ /metrics 수집'), (P4, T - 0.2, 'green', '④ 지표 계산'))
 
 
 def box(s, geometry, title, subtitle, mono=False):
@@ -63,7 +86,7 @@ def build(theme):
     for color, d in (('violet', 'M791,488 L840,470 L890,477 L940,458 L990,469 L1040,460 L1120,470'),
                      ('green', 'M791,501 L840,498 L890,502 L940,491 L990,495 L1040,498 L1120,493')):
         s.base.append(f'<path d="{d}" fill="none" stroke="{c[color]}" stroke-width="2" opacity=".35"/>')
-        s.fx.append(f'<path d="{d}" fill="none" stroke="{c[color]}" stroke-width="2.5" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1">{anim("stroke-dashoffset", [0,20.4,23,T], [1,1,0,0])}{shown((20.4,26.5))}</path>')
+        s.fx.append(f'<path d="{d}" fill="none" stroke="{c[color]}" stroke-width="2.5" pathLength="1" stroke-dasharray="1" stroke-dashoffset="1">{anim("stroke-dashoffset", [0, *LINES, T], [1,1,0,0])}{shown((LINES[0], T - 0.2))}</path>')
 
     s.lane('request', 'M184,217 H257')
     s.lane('dispatch', 'M424,217 H475')
@@ -76,23 +99,24 @@ def build(theme):
     s.lane('b-text', 'M647,507 H713 V290 H750')
     s.lane('compute', 'M955,279 V303')
     s.lane('draw', 'M955,383 V401')
-    for color, at, code in (('violet', .7, '200'), ('red', 6.7, '500')):
-        s.glow_block(middleware, color, [(at, at+4.5)])
-        s.glow_block(api, color, [(at+1.2, at+3)])
-        s.glow_block(endpoint_a, color, [(at+3.4, at+5)])
-        for path, begin, end, chip in (('request',at,at+.9,None), ('dispatch',at+1,at+1.8,None),
-                                       ('response',at+2.1,at+2.7,code), ('return',at+2.9,at+3.6,code),
-                                       ('count',at+3.3,at+4,None)):
-            s.packet(path, begin, end, color, chip=chip, trail=False)
+    for color, (trip, count), code in (('violet', (OK_TRIP, OK_COUNT), '200'), ('red', (ERR_TRIP, ERR_COUNT), '500')):
+        into, dispatch, response, back = trip
+        s.glow_block(middleware, color, [(into[1] - 0.1, back[0] + 0.4)])
+        s.glow_block(api, color, [(dispatch[1] - 0.1, response[0] + 0.5)])
+        s.glow_block(endpoint_a, color, [(count[1] - 0.1, count[1] + READ)])
+        for path, leg, chip, ease in (('request', into, None, EASE_IN), ('dispatch', dispatch, None, LINEAR),
+                                      ('response', response, code, LINEAR), ('return', back, code, EASE_OUT),
+                                      ('count', count, None, EASE_OUT)):
+            s.packet(path, *leg, color, chip=chip, trail=False, ease=ease)
         message = '전체 요청 +1 · 응답시간 기록' if code == '200' else '전체 요청 +1 · 5xx +1 · 응답시간 기록'
-        s.fx.append(f'<text class="t" x="260" y="411" font-size="12" fill="{c[color]}" opacity="0">{shown((at+3.6,at+5))}{escape(message)}</text>')
-    for path, begin, end in (('a-get',12.8,14), ('a-text',14.3,15.5), ('b-get',16,17.2), ('b-text',17.5,18.7)):
-        s.packet(path, begin, end, 'blue', chip='GET' if path.endswith('get') else 'text', trail=False)
-    for endpoint, start, end in ((endpoint_a,12.8,15.5),(endpoint_b,16,18.7)):
-        s.glow_block(endpoint, 'blue', [(start,end)])
-    s.glow_block(calculate, 'green', [(20.4,23.5)])
-    s.packet('compute',20.6,21.2,'green',trail=False)
-    s.packet('draw',22,22.6,'green',trail=False)
+        s.fx.append(f'<text class="t" x="260" y="411" font-size="12" fill="{c[color]}" opacity="0">{shown((count[1], count[1] + READ))}{escape(message)}</text>')
+    for path, leg, ease in (('a-get', A_GET, EASE_IN), ('a-text', A_TEXT, LINEAR), ('b-get', B_GET, LINEAR), ('b-text', B_TEXT, EASE_OUT)):
+        s.packet(path, *leg, 'blue', chip='GET' if path.endswith('get') else 'text', trail=False, ease=ease)
+    for endpoint, (start, end) in ((endpoint_a, (A_GET[0], A_TEXT[1])), (endpoint_b, (B_GET[0], B_TEXT[1]))):
+        s.glow_block(endpoint, 'blue', [(start, end)])
+    s.glow_block(calculate, 'green', [(COMPUTE[0], LINES[1] + 0.6)])
+    s.packet('compute', *COMPUTE, 'green', trail=False, ease=EASE_IN)
+    s.packet('draw', *DRAW, 'green', trail=False, ease=EASE_OUT)
 
     s.rect(s.base, 36, 563, 1128, 56, 10, 'panel', 'border')
     s.text(s.base, 54, 587, '5분 예시', 12, 'text', 700)
