@@ -139,6 +139,54 @@ func TestHistogramAndWindow(t *testing.T) {
 		t.Fatal("incomplete window accepted")
 	}
 }
+func TestBusiestProcessUsesTickDeltasOfTheSameProcess(t *testing.T) {
+	start := time.Unix(1000, 0)
+	_, ok, first := busiestProcess("100\n1 500 10\n42 1000 77\n43 50 80\n", processSample{}, start)
+	if ok || len(first.Ticks) != 3 {
+		t.Fatalf("first sample must only seed the baseline: %v %d", ok, len(first.Ticks))
+	}
+	// 15 s later: PID 42 used 3 s of CPU (20%), PID 43 restarted with a new start
+	// time and huge ticks, PID 44 is new, and PID 1 is unchanged.
+	value, ok, second := busiestProcess("100\n1 500 10\n42 1300 77\n43 9000 999\n44 7000 1200\n", first, start.Add(15*time.Second))
+	if !ok || value < 19.99 || value > 20.01 {
+		t.Fatalf("busiest process %v %v", value, ok)
+	}
+	// Multithreaded work above one core is kept, ticks per second come from the host.
+	value, ok, _ = busiestProcess("250\n42 1300 77\n", processSample{At: start, Ticks: map[string]float64{"42:77": 300}}, start.Add(2*time.Second))
+	if !ok || value != 200 {
+		t.Fatalf("multi-core process %v %v", value, ok)
+	}
+	if _, ok, _ = busiestProcess("100\n42 100 77\n", second, start.Add(30*time.Second)); ok {
+		t.Fatal("a counter that went backwards was reported")
+	}
+	if _, ok, _ = busiestProcess("100\n42 1400 77\n", first, start.Add(2*time.Hour)); ok {
+		t.Fatal("a stale baseline was reported")
+	}
+	if _, ok, _ = busiestProcess("", first, start.Add(15*time.Second)); ok {
+		t.Fatal("empty process output was reported")
+	}
+}
+func TestParseDiskCapacity(t *testing.T) {
+	const gib = 1024 * 1024
+	for name, sample := range map[string]struct {
+		line                       string
+		percent, total, used, free float64
+	}{
+		"linux": {"/dev/sda1         103081248  41232500  56588112      43% /", 43, 103081248.0 / gib, 41232500.0 / gib, 56588112.0 / gib},
+		"macos": {"/dev/disk3s1s1    482797652  10508552 284262880      4%    /", 4, 482797652.0 / gib, 10508552.0 / gib, 284262880.0 / gib},
+	} {
+		values := map[string]float64{}
+		parseDisk(sample.line, values)
+		if values["disk"] != sample.percent || values["disk-total"] != sample.total || values["disk-used"] != sample.used || values["disk-free"] != sample.free {
+			t.Fatalf("%s disk values %v", name, values)
+		}
+	}
+	values := map[string]float64{}
+	parseDisk("Filesystem 1024-blocks Used Available Capacity Mounted on", values)
+	if len(values) != 0 {
+		t.Fatal("df header parsed as a sample")
+	}
+}
 func TestCollectionDoesNotFollowHTTPRedirects(t *testing.T) {
 	hit := false
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hit = true }))

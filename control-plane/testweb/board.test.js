@@ -194,6 +194,13 @@ test('dashboard groups server receive and send traffic into one row per selected
     assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row]), [['node-cpu', undefined], ['memory-host', undefined], ['network-in', 'network:0'], ['network-out', 'network:0']]);
     assert.ok(dashboardRecipes(snapshot([metric('network-in', { host: 1 })]), ['host']).every(r => !r.family));
 });
+test('server dashboard shows process CPU, RAM and disk capacity with total, used and free on one axis', () => {
+    const s = snapshot(['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'uptime', 'swap'].map(id => metric(id, { host: 10 })));
+    const recipes = dashboardRecipes(s, ['host']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['node-cpu', undefined], ['cpu', undefined], ['memory-host', undefined], ['disk', undefined], ['disk-total', '전체'], ['disk-used', '사용'], ['disk-free', '남음']]);
+    assert.ok(recipes.filter(r => r.family).every(r => r.family.row === 'disk-capacity:0'));
+    assert.ok(['cpu', 'disk-total', 'disk-used', 'disk-free'].every(id => metricsForAsset(snapshot(), s.assets[3]).some(m => m.id === id)));
+});
 test('crowded families split into one row per part and keep every selected line', () => {
     const ids = Array.from({ length: 9 }, (_, i) => 'api-' + i), values = Object.fromEntries(ids.map((id, i) => [id, i]));
     const s = snapshot([metric('p50', values), metric('p99', values)]);
