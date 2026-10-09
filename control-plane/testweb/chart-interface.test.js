@@ -49,7 +49,8 @@ test('selecting a merge target combines immediately and the header undo restores
     const snapshot = {
         start: 100, end: 115, step: 15,
         assets: [{id: 'merge-ui-a', name: 'Server A', kind: 'server', enabled: true}],
-        metrics: ['node-cpu', 'memory-host'].map(id => ({id, series: [{labels: {assetId: 'merge-ui-a', name: 'Server A'}, points: [{time: 115, value: id === 'node-cpu' ? 12 : 37}]}]})),
+        // Two ungrouped charts: CPU, RAM and disk together would form the compact resource row.
+        metrics: ['node-cpu', 'cpu'].map(id => ({id, series: [{labels: {assetId: 'merge-ui-a', name: 'Server A'}, points: [{time: 115, value: id === 'node-cpu' ? 12 : 37}]}]})),
     };
     const root = document.createElement('div');
     document.querySelector('main').append(root);

@@ -57,11 +57,13 @@ export function metricRecipes(snapshot, ids, definitions) {
 // One quantity measured at several percentiles, windows, directions or policies.
 // Members share a unit and read best side by side on one axis.
 export const metricFamilies = [
+    // CPU and RAM share 0-100 %; disk usage keeps its own axis up to the largest capacity.
+    { id: 'resources', title: '기본 리소스', mixedUnits: true, members: [['node-cpu', 'CPU'], ['memory-host', 'RAM'], ['disk-used', '디스크']] },
     { id: 'latency', title: '응답 시간 분포', members: [['p50', 'P50'], ['p95', 'P95'], ['p97', 'P97'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['latency-mean', '평균']] },
     { id: 'outcome-latency', title: '성공·실패 요청 P99', members: [['success-latency', '성공'], ['failed-latency', '실패']] },
     { id: 'event-loop', title: '이벤트 루프 지연', members: [['loop-p99', 'P99'], ['loop-max', '최대']] },
     { id: 'slo-burn', title: '오류 예산 소진 속도', members: [['slo-burn', '5분'], ['slo-burn-hour', '1시간']] },
-    { id: 'disk-capacity', title: '디스크 용량', members: [['disk-total', '전체'], ['disk-used', '사용'], ['disk-free', '남음']] },
+    { id: 'disk-capacity', title: '디스크 용량', members: [['disk-total', '전체'], ['disk-free', '남음']] },
     { id: 'network', title: '네트워크 송수신', members: [['network-in', '수신'], ['network-out', '송신']] },
     { id: 'db-network', title: 'DB 송수신', members: [['db-network-in', '수신'], ['db-network-out', '송신']] },
     { id: 'cookie-policy', title: '세션 쿠키 정책', members: [['cookie-secure', 'Secure'], ['cookie-http', 'HttpOnly'], ['cookie-samesite', 'SameSite']] },
@@ -97,8 +99,8 @@ export function arrangeFamilies(recipes) {
 // The overview is deliberately small. Full collection and event evidence use
 // metricsForAsset/eventMetricIds and never inherit this display filter.
 export const dashboardMetrics = {
-    application: ['requests', 'p99', 'errors', 'cpu', 'memory'],
-    server: ['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'network-in', 'network-out'],
+    application: ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
+    server: ['node-cpu', 'cpu', 'memory-host', 'disk-used', 'network-in', 'network-out'],
     postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
     mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
     mariadb: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
@@ -106,8 +108,8 @@ export const dashboardMetrics = {
     redis: ['redis-probe', 'redis-commands', 'redis-used', 'redis-hit'],
     http: ['probe-latency'],
 };
-// CPU and memory read together when applications and servers are selected at once.
-const dashboardOrder = [...new Set(['requests', 'p99', 'errors', 'node-cpu', 'cpu', 'memory-host', 'memory', ...Object.values(dashboardMetrics).flat()])];
+// Basic host resources first, then the latency distribution, then everything else.
+const dashboardOrder = [...new Set(['node-cpu', 'memory-host', 'disk-used', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'requests', 'errors', 'cpu', 'memory', ...Object.values(dashboardMetrics).flat()])];
 // A dashboard chart belongs to a metric; each eligible asset keeps its own line.
 export function dashboardRecipes(snapshot, ids) {
     const selected = snapshot.assets.filter(asset => ids.includes(asset.id));
@@ -150,11 +152,14 @@ export function comparisonLines(snapshot, ids, metricIds) {
         const metric = metricById.get(id);
         if (!metric)
             continue;
+        const totals = metric.capacityMetric && snapshot.metrics.find(m => m.id === metric.capacityMetric)?.series;
         for (const series of snapshot.metrics.find(m => m.id === id)?.series || []) {
             if (!allowed.has(series.labels.assetId) || !series.points.some(p => p.value !== null))
                 continue;
             const assetName = series.labels.name || series.labels.assetId;
-            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points });
+            // A usage line carries its own latest capacity so the axis can top out at the largest one.
+            const capacity = totals?.find(s => s.labels.assetId === series.labels.assetId)?.points.findLast(p => Number.isFinite(p.value))?.value;
+            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points, ...(capacity > 0 ? { capacity } : {}) });
         }
     }
     return lines;

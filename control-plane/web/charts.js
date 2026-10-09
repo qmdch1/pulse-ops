@@ -8,6 +8,8 @@ import {esc,icon,shortTime,fullTime,preference,savePreference} from './ui.js';
 
 const palette=['#b5a1ff','#63d9bd','#6dbafb','#f3bc77','#ef8eae','#cbd376','#c39beb','#71cad2'];
 const format=v=>v===null||v===undefined?'—':formatNumber(v);
+// Usage lines read against their own capacity: "20.7 / 1,006.9 GiB".
+const unitOf=line=>line.capacity?`/ ${format(line.capacity)} ${line.unit}`:line.unit;
 const clockFormat=new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'Asia/Seoul'});
 const groups=new Set();
 const layout=readLayout(preference('pulse-chart-layout-v1',{}));
@@ -48,14 +50,16 @@ class FamilyRow {
   this.resize=new ResizeObserver(([entry])=>{this.body.style.gridTemplateColumns=`repeat(${familyColumns(entry.contentRect.width,this.size)},minmax(0,1fr))`});this.resize.observe(this.body);
  }
  color(assetId){return Math.max(0,this.order.indexOf(assetId))}
- scale(unit){if(!this.scales.has(unit))this.scales.set(unit,sharedScale(this.charts.filter(c=>c.lines.length).map(c=>axisScale(c.lines,unit,c.snapshot.start,c.snapshot.end,c.hidden)),unit));return this.scales.get(unit)}
+ // Only cards of the same unit share an axis, so CPU and RAM align while disk keeps its capacity axis.
+ scale(unit){if(!this.scales.has(unit))this.scales.set(unit,sharedScale(this.charts.filter(c=>c.lines.length&&c.units.includes(unit)).map(c=>axisScale(c.lines,unit,c.snapshot.start,c.snapshot.end,c.hidden)),unit));return this.scales.get(unit)}
  // Colors follow the infrastructure, not the line position, and hiding one keeps the rest unchanged.
  changed(){this.scales.clear();const seen=new Set(this.charts.flatMap(c=>c.lines.map(l=>l.assetId)));this.order=[...new Set(this.charts.flatMap(c=>c.recipe.assetIds))].filter(id=>seen.has(id));if(!this.frame)this.frame=requestAnimationFrame(()=>{this.frame=0;this.render()})}
  render(){
   const names=new Map(this.charts.flatMap(c=>c.lines.map(l=>[l.assetId,l.assetName]))),legend=this.node.querySelector('.chart-family-legend');
   legend.replaceChildren(...this.order.map(id=>{const button=document.createElement('button'),off=this.hiddenAssets.has(id);button.classList.toggle('muted',off);button.setAttribute('aria-pressed',String(!off));button.title=`${names.get(id)} · 이 행 전체에서 ${off?'다시 표시':'숨기기'}`;button.innerHTML=`<i></i><span>${esc(names.get(id))}</span>`;button.querySelector('i').style.background=palette[this.color(id)%8];button.onclick=()=>{if(this.hiddenAssets.has(id))this.hiddenAssets.delete(id);else this.hiddenAssets.add(id);this.charts.forEach(c=>c.follow());this.changed()};return button}));
-  const unit=this.charts.find(c=>c.lines.length)?.lines[0].unit,scale=unit&&this.scale(unit),warnings=[...new Set(this.charts.map(c=>c.recipe.warning).filter(Number.isFinite))];
-  this.node.querySelector('header p').textContent=[this.charts.map(c=>c.recipe.family.label).join(' · '),scale?`같은 축 ${axisRangeLabel(scale)}`:'관측 대기',scale&&unit!=='0/1'&&warnings.length===1?`점선 경고 ${formatAxisTick(warnings[0],scale)}${scale.displayUnit?' '+scale.displayUnit:''}`:''].filter(Boolean).join(' · ');
+  const units=[...new Set(this.charts.filter(c=>c.lines.length).map(c=>c.lines[0].unit))],unit=units[0],scale=unit&&this.scale(unit),warnings=[...new Set(this.charts.map(c=>c.recipe.warning).filter(Number.isFinite))];
+  const axes=units.length>1?units.map(u=>{const labels=this.charts.filter(c=>c.lines[0]?.unit===u).map(c=>c.recipe.family.label);return `${labels.join(' · ')} ${labels.length>1?'같은 축 ':''}${axisRangeLabel(this.scale(u))}`}):[];
+  this.node.querySelector('header p').textContent=units.length>1?axes.join(' · '):[this.charts.map(c=>c.recipe.family.label).join(' · '),scale?`같은 축 ${axisRangeLabel(scale)}`:'관측 대기',scale&&unit!=='0/1'&&warnings.length===1?`점선 경고 ${formatAxisTick(warnings[0],scale)}${scale.displayUnit?' '+scale.displayUnit:''}`:''].filter(Boolean).join(' · ');
   for(const chart of this.charts){chart.showLatest();if(chart.visible)chart.draw()}
  }
  destroy(){cancelAnimationFrame(this.frame);this.resize.disconnect()}
@@ -129,7 +133,7 @@ class CanvasChart {
    if(!button){button=document.createElement('button');button.dataset.series=line.key;button.innerHTML='<i></i><span></span><strong></strong>';button.onclick=()=>{if(this.hidden.has(line.key))this.hidden.delete(line.key);else this.hidden.add(line.key);button.classList.toggle('muted',this.hidden.has(line.key));button.setAttribute('aria-pressed',String(!this.hidden.has(line.key)));this.draw()};legend.append(button)}
    existing.delete(line.key);button.title=line.name;button.setAttribute('aria-pressed',String(!this.hidden.has(line.key)));button.classList.toggle('muted',this.hidden.has(line.key));
    button.querySelector('span').textContent=this.recipe.metricIds.length===1?line.assetName||line.name:line.name;button.querySelector('i').style.background=palette[index%8];
-   const number=button.querySelector('strong'),previous=number.textContent;number.innerHTML=`${format(value)} <small>${esc(line.unit==='0/1'?'(0 / 1)':line.unit)}</small>`;
+   const number=button.querySelector('strong'),previous=number.textContent;number.innerHTML=`${format(value)} <small>${esc(line.unit==='0/1'?'(0 / 1)':unitOf(line))}</small>`;
    if(previous&&previous!==number.textContent)valueChanged(number);
   });
   for(const button of existing.values())button.remove();
@@ -142,7 +146,7 @@ class CanvasChart {
  showLatest(){
   const shown=this.lines.filter(l=>!this.hidden.has(l.key)),unit=this.units[0]==='0/1'?'':this.units[0]||'',box=this.node.querySelector('.chart-latest');
   const before=box.textContent;
-  if(shown.length===1)box.innerHTML=`<strong>${format(this.latest(shown[0]))}${unit?`<small>${esc(unit)}</small>`:''}</strong>`;
+  if(shown.length===1)box.innerHTML=`<strong>${format(this.latest(shown[0]))}${unit?`<small>${esc(unitOf(shown[0]))}</small>`:''}</strong>`;
   else if(!shown.length)box.textContent=this.lines.length?'모두 숨김':'';
   else box.replaceChildren(...shown.map(line=>{const value=document.createElement('span');value.title=line.assetName;value.innerHTML=`<i></i>${format(this.latest(line))}`;value.querySelector('i').style.background=palette[this.paint(line)%8];return value}));
   if(shown.length===1&&before&&before!==box.textContent)valueChanged(box.querySelector('strong'));
@@ -176,13 +180,15 @@ class CanvasChart {
   this.lines.forEach((line,index)=>{if(this.hidden.has(line.key))return;const scale=this.scales[line.unit],color=this.paint(line,index);ctx.strokeStyle=palette[color%8];ctx.lineWidth=this.compact?1.5:1.7;ctx.setLineDash(color>3?[5,3]:[]);ctx.beginPath();let drawing=false;
    for(const row of this.rows){const value=row['v'+index];if(value===null||value===undefined){drawing=false;continue}const x=left+(row.time-this.snapshot.start)/(this.snapshot.end-this.snapshot.start)*this.plotWidth,y=12+this.plotHeight*(1-(value-scale.low)/(scale.high-scale.low));if(drawing)ctx.lineTo(x,y);else ctx.moveTo(x,y);drawing=true}ctx.stroke();
   });
+  // The axis tops out at the largest capacity; a smaller one gets a faint ceiling in its own color.
+  this.lines.forEach((line,index)=>{const scale=this.scales[line.unit];if(this.hidden.has(line.key)||!line.capacity||line.capacity>=scale.high)return;const y=12+this.plotHeight*(1-(line.capacity-scale.low)/(scale.high-scale.low));ctx.strokeStyle=palette[this.paint(line,index)%8];ctx.globalAlpha=.6;ctx.setLineDash([2,4]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+this.plotWidth,y);ctx.stroke();ctx.globalAlpha=1});
   if(this.recipe.warning!==undefined&&this.units.length===1){const scale=this.scales[this.units[0]],y=12+this.plotHeight*(1-(this.recipe.warning-scale.low)/(scale.high-scale.low));ctx.strokeStyle='#c9a46a';ctx.setLineDash([4,5]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+this.plotWidth,y);ctx.stroke()}
   ctx.restore();this.drawCursor();
  }
  drawCursor(){
   if(!this.visible||!this.width)return;const ctx=this.overlay.getContext('2d');ctx.clearRect(0,0,this.width,this.height);this.tooltip.hidden=cursor===null||!this.pointer;if(cursor===null)return;
   const x=this.left+(cursor-this.snapshot.start)/(this.snapshot.end-this.snapshot.start)*this.plotWidth;ctx.strokeStyle='#a995df';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(x,8);ctx.lineTo(x,this.height-25);ctx.stroke();
-  if(this.pointer){const bucket=Math.floor(cursor/this.snapshot.step)*this.snapshot.step,row=this.rows.find(r=>r.time===bucket);this.tooltip.innerHTML=`<strong>${esc(fullTime(cursor))}</strong>`+this.lines.map((l,i)=>this.hidden.has(l.key)?'':`<div><span>${esc(this.compact?l.assetName:l.name)}</span><b>${format(row?.['v'+i])} ${esc(l.unit)}</b></div>`).join('');this.tooltip.style.left='0px';this.tooltip.style.left=`${Math.min(Math.max(8,x),Math.max(8,this.width-this.tooltip.offsetWidth-8))}px`;this.tooltip.style.top='4px'}
+  if(this.pointer){const bucket=Math.floor(cursor/this.snapshot.step)*this.snapshot.step,row=this.rows.find(r=>r.time===bucket);this.tooltip.innerHTML=`<strong>${esc(fullTime(cursor))}</strong>`+this.lines.map((l,i)=>this.hidden.has(l.key)?'':`<div><span>${esc(this.compact?l.assetName:l.name)}</span><b>${format(row?.['v'+i])} ${esc(unitOf(l))}</b></div>`).join('');this.tooltip.style.left='0px';this.tooltip.style.left=`${Math.min(Math.max(8,x),Math.max(8,this.width-this.tooltip.offsetWidth-8))}px`;this.tooltip.style.top='4px'}
  }
  destroy(){if(drag?.chart===this)drag.cancel();this.resize.disconnect();delete this.node._pulseChart}
 }
