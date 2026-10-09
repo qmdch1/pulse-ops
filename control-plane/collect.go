@@ -136,6 +136,9 @@ func (s *Service) collect(ctx context.Context, id string) error {
 	if record.Asset.Status != state {
 		s.store.Record(id, "collection."+state, state)
 	}
+	if err := s.enqueueAssetNotifications(id); err != nil {
+		s.store.Record(id, "notification.evaluate", "failed")
+	}
 	return e
 }
 func (s *Service) previousFor(id string) previousSample {

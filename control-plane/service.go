@@ -89,6 +89,7 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 }
 func (s *Service) apiHandler() http.Handler {
 	api := http.NewServeMux()
+	s.installIntegrationAPI(api)
 	api.HandleFunc("GET /assets", func(w http.ResponseWriter, r *http.Request) {
 		assets, e := s.store.List()
 		if e != nil {
@@ -139,6 +140,7 @@ func (s *Service) apiHandler() http.Handler {
 		delete(s.retry, asset.ID)
 		delete(s.failures, asset.ID)
 		s.mu.Unlock()
+		s.store.forgetAssetNotifications(asset.ID)
 		writeJSON(w, 200, asset)
 	})
 	api.HandleFunc("DELETE /assets/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +149,7 @@ func (s *Service) apiHandler() http.Handler {
 			return
 		}
 		s.store.Record(r.PathValue("id"), "asset.delete", "ok")
+		s.store.forgetAssetNotifications(r.PathValue("id"))
 		writeJSON(w, 200, map[string]bool{"ok": true})
 	})
 	api.HandleFunc("POST /assets/{id}/fingerprint", func(w http.ResponseWriter, r *http.Request) {
@@ -205,6 +208,7 @@ func (s *Service) apiHandler() http.Handler {
 			fail(w, 404, e.Error())
 			return
 		}
+		s.store.forgetAssetNotifications(asset.ID)
 		writeJSON(w, 200, asset)
 	})
 	api.HandleFunc("POST /terminals", func(w http.ResponseWriter, r *http.Request) {
@@ -394,6 +398,7 @@ func main() {
 		}
 	}
 	go service.run(ctx)
+	go service.runNotifications(ctx)
 	server := &http.Server{Addr: address, Handler: service.webHandler(mode, os.Getenv("DASHBOARD_USERNAME"), os.Getenv("DASHBOARD_PASSWORD"), os.Getenv("SSH_INVENTORY_FILE")), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()
