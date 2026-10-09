@@ -54,15 +54,48 @@ test('dashboard automatically shares matching server metrics and retains each se
     assert.deepEqual(single.find(recipe => recipe.metricIds[0] === 'node-cpu').keys, ['node-cpu:host-b']);
     assert.deepEqual(dashboardRecipes(s, []), []);
 });
-test('dashboard missing metrics stay scoped to the selected infrastructure without inventing values', () => {
+test('dashboard excludes missing metrics even when an old preference requests them', () => {
     const s = snapshot([metric('node-cpu', { host: 0 }), metric('memory-host', { host: null }), metric('db-probe', { db: 5 })]);
     const observed = dashboardRecipes(s, ['host', 'deleted']);
     assert.deepEqual(observed.map(recipe => recipe.metricIds[0]), ['node-cpu']);
     const missing = dashboardRecipes(s, ['host'], true);
-    const memory = missing.find(recipe => recipe.metricIds[0] === 'memory-host');
-    assert.ok(memory);
-    assert.equal(comparisonLines(s, memory.assetIds, memory.metricIds).length, 0);
+    assert.deepEqual(missing.map(recipe => recipe.metricIds[0]), ['node-cpu']);
     assert.ok(!missing.some(recipe => recipe.metricIds.includes('db-probe')));
+});
+
+test('dashboard keeps operational signals while full collection and event evidence retain diagnostic metrics', () => {
+    const s = snapshot([
+        metric('requests', {'api-a': 25}), metric('p99', {'api-a': 100, host: 999}),
+        metric('errors', {'api-a': 0}), metric('p50', {'api-a': 20}), metric('p99.9', {'api-a': 150}),
+        metric('cookie-expiry', {'api-a': -15}), metric('node-cpu', {host: 3}), metric('memory-host', {host: 45}),
+        metric('disk', {host: 50}), metric('load', {host: 1}), metric('uptime', {host: 90000}),
+        metric('targets-down', {host: 0}), metric('scrape-age', {host: 2}),
+    ]);
+    const before = structuredClone(s), incidents = registeredIncidents(s);
+    const recipes = dashboardRecipes(s, ['api-a', 'host']);
+    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p99', 'errors', 'node-cpu', 'memory-host', 'disk']);
+    assert.deepEqual(recipes.find(r => r.metricIds[0] === 'p99').keys, ['p99:api-a']);
+    assert.ok(metricsForAsset(s, s.assets[0]).some(m => m.id === 'cookie-expiry'));
+    assert.ok(metricsForAsset(s, s.assets[3]).some(m => m.id === 'uptime'));
+    assert.ok(eventMetricIds({metricIds: ['cookie-expiry']}, [s.assets[0]]).includes('cookie-expiry'));
+    assert.deepEqual(registeredIncidents(s), incidents);
+    assert.deepEqual(s, before);
+});
+
+test('database, cache and HTTP dashboards omit state codes and collection internals', () => {
+    const s = snapshot([
+        metric('db-probe', {db: 2}), metric('db-statements', {db: 100}), metric('db-connection-usage', {db: 40}),
+        metric('mysql-buffer-hit', {db: 99}), metric('db-up', {db: 1}), metric('db-uptime', {db: 200000}),
+        metric('redis-probe', {cache: 1}), metric('redis-commands', {cache: 1000}), metric('redis-used', {cache: 20}),
+        metric('redis-hit', {cache: 98}), metric('redis-up', {cache: 1}), metric('redis-expired', {cache: 2}),
+        metric('probe-latency', {web: 30}), metric('http-status', {web: 200}), metric('tls-expiry', {web: 60}),
+    ]);
+    s.assets.push(asset('cache', 'redis'), asset('web', 'http'));
+    assert.deepEqual(dashboardRecipes(s, ['db']).map(r => r.metricIds[0]), ['db-probe', 'db-statements', 'db-connection-usage']);
+    assert.deepEqual(dashboardRecipes(s, ['cache']).map(r => r.metricIds[0]), ['redis-probe', 'redis-commands', 'redis-used', 'redis-hit']);
+    assert.deepEqual(dashboardRecipes(s, ['web']).map(r => r.metricIds[0]), ['probe-latency']);
+    assert.ok(metricsForAsset(s, s.assets[2]).some(m => m.id === 'mysql-buffer-hit'));
+    assert.ok(metricsForAsset(s, s.assets.at(-1)).some(m => m.id === 'http-status'));
 });
 test('display comparison does not change asset-local incident evaluation', () => {
     const s = snapshot([metric('p99', { 'api-a': 700 }), metric('cpu', { 'api-b': 10 })]);

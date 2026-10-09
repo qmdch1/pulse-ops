@@ -54,13 +54,26 @@ export function metricRecipes(snapshot, ids, definitions) {
         }));
     });
 }
-// A dashboard chart belongs to a metric; each selected asset keeps its own line.
-export function dashboardRecipes(snapshot, ids, showMissing = false) {
+// The overview is deliberately small. Full collection and event evidence use
+// metricsForAsset/eventMetricIds and never inherit this display filter.
+export const dashboardMetrics = {
+    application: ['requests', 'p99', 'errors', 'cpu', 'memory'],
+    server: ['node-cpu', 'memory-host', 'disk', 'network-in', 'network-out'],
+    postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
+    mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
+    mariadb: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
+    oracle: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
+    redis: ['redis-probe', 'redis-commands', 'redis-used', 'redis-hit'],
+    http: ['probe-latency'],
+};
+const dashboardOrder = [...new Set(Object.values(dashboardMetrics).flat())];
+// A dashboard chart belongs to a metric; each eligible asset keeps its own line.
+export function dashboardRecipes(snapshot, ids) {
     const selected = snapshot.assets.filter(asset => ids.includes(asset.id));
-    const relevant = new Set(selected.flatMap(asset => metricsForAsset(snapshot, asset).map(metric => metric.id)));
-    const definitions = metrics.filter(metric => relevant.has(metric.id) &&
-        (showMissing || selected.some(asset => observedForAsset(snapshot, metric.id, asset.id))));
-    return metricRecipes(snapshot, selected.map(asset => asset.id), definitions);
+    return dashboardOrder.flatMap(id => {
+        const owners = selected.filter(asset => (dashboardMetrics[asset.kind] || []).includes(id) && observedForAsset(snapshot, id, asset.id));
+        return owners.length ? metricRecipes(snapshot, owners.map(asset => asset.id), [metricById.get(id)]).map(recipe => ({...recipe, subtitle: undefined})) : [];
+    });
 }
 export function relatedAssets(snapshot, rootIds) {
     const byId = new Map(snapshot.assets?.map(a => [a.id, a]) || []), seen = new Set(), pending = [...rootIds];
@@ -99,7 +112,8 @@ export function comparisonLines(snapshot, ids, metricIds) {
         for (const series of snapshot.metrics.find(m => m.id === id)?.series || []) {
             if (!allowed.has(series.labels.assetId) || !series.points.some(p => p.value !== null))
                 continue;
-            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, name: `${series.labels.name || series.labels.assetId} · ${metric.title}`, unit: metric.unit, points: series.points });
+            const assetName = series.labels.name || series.labels.assetId;
+            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points });
         }
     }
     return lines;
