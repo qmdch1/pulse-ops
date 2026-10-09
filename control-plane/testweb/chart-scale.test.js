@@ -67,6 +67,18 @@ test('capacity and duration axes use explicit binary and time units without chan
     assert.equal(axisRangeLabel(axisScale([line('uptime', '초', [3600])], '초', 0, 0)), '0–1 일');
 });
 
+test('disk usage tops out at the largest total capacity among the shown servers', () => {
+    const used = (key, value, capacity) => ({...line('disk-used', 'GiB', [value], key), ...(capacity ? {capacity} : {})});
+    const lines = [used('small', 45, 50), used('large', 20.7, 1006.85), used('mid', 300, 500)];
+    assert.equal(axisScale(lines, 'GiB', 0, 0).high, 1006.85);
+    assert.equal(axisRangeLabel(axisScale(lines, 'GiB', 0, 0)), '0–1,006.85 GiB');
+    assert.equal(axisScale(lines, 'GiB', 0, 0, new Set(['large'])).high, 500);
+    assert.equal(axisScale([used('small', 45, 50)], 'GiB', 0, 0).high, 50);
+    assert.equal(axisRangeLabel(axisScale([used('tib', 900, 1862.6)], 'GiB', 0, 0)), '0–1.82 TiB');
+    assert.equal(axisScale([used('unknown', 20)], 'GiB', 0, 0).high, 100);
+    assert.equal(axisScale([used('grown', 60, 50)], 'GiB', 0, 0).high, 60);
+});
+
 test('a family row shares the widest member range and picks one display unit for it', () => {
     const median = axisScale([line('p50', 'ms', [20])], 'ms', 0, 0), tail = axisScale([line('p99.9', 'ms', [1900])], 'ms', 0, 0);
     const shared = sharedScale([median, tail], 'ms');

@@ -6,9 +6,10 @@ export function axisScale(lines, unit, start, end, hidden = new Set()) {
     const visible = matching.filter(line => !hidden.has(line.key));
     const defaults = visible.length ? visible : matching;
     let low = 0, high = 0;
+    // Usage measured against a capacity tops out at the largest capacity shown.
     for (const line of defaults) {
         const metric = metricById.get(line.metricId);
-        high = Math.max(high, metric?.axisMax || 1);
+        high = Math.max(high, line.capacity || metric?.axisMax || 1);
     }
     for (const line of visible)
         for (const point of line.points)

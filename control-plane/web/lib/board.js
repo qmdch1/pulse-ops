@@ -98,7 +98,7 @@ export function arrangeFamilies(recipes) {
 // metricsForAsset/eventMetricIds and never inherit this display filter.
 export const dashboardMetrics = {
     application: ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
-    server: ['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'network-in', 'network-out'],
+    server: ['node-cpu', 'cpu', 'memory-host', 'disk-used', 'network-in', 'network-out'],
     postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
     mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
     mariadb: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
@@ -150,11 +150,14 @@ export function comparisonLines(snapshot, ids, metricIds) {
         const metric = metricById.get(id);
         if (!metric)
             continue;
+        const totals = metric.capacityMetric && snapshot.metrics.find(m => m.id === metric.capacityMetric)?.series;
         for (const series of snapshot.metrics.find(m => m.id === id)?.series || []) {
             if (!allowed.has(series.labels.assetId) || !series.points.some(p => p.value !== null))
                 continue;
             const assetName = series.labels.name || series.labels.assetId;
-            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points });
+            // A usage line carries its own latest capacity so the axis can top out at the largest one.
+            const capacity = totals?.find(s => s.labels.assetId === series.labels.assetId)?.points.findLast(p => Number.isFinite(p.value))?.value;
+            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points, ...(capacity > 0 ? { capacity } : {}) });
         }
     }
     return lines;
