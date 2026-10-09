@@ -72,7 +72,9 @@ func openStore(dir string) (*Store, error) {
  CREATE INDEX IF NOT EXISTS observation_time ON observations(observed_at);
  CREATE TABLE IF NOT EXISTS audit (asset_id TEXT,action TEXT,status TEXT,at TEXT);
  CREATE INDEX IF NOT EXISTS audit_time ON audit(at);
- CREATE TABLE IF NOT EXISTS integrations (id TEXT PRIMARY KEY,payload BLOB NOT NULL);`)
+ CREATE TABLE IF NOT EXISTS integrations (id TEXT PRIMARY KEY,payload BLOB NOT NULL);
+ CREATE TABLE IF NOT EXISTS operations (kind TEXT NOT NULL,id TEXT NOT NULL,at INTEGER NOT NULL,payload BLOB NOT NULL,PRIMARY KEY(kind,id));
+ CREATE INDEX IF NOT EXISTS operations_time ON operations(kind,at);`)
 	if e != nil {
 		db.Close()
 		return nil, e
@@ -160,6 +162,9 @@ func (s *Store) Save(input AssetInput) (Asset, error) {
 	a := input.Asset
 	secret := Secrets{}
 	if a.ID == "" {
+		if len(all) >= 200 {
+			return Asset{}, errors.New("인프라는 최대 200개까지 등록할 수 있습니다")
+		}
 		a.ID = ID()
 		a.CreatedAt = nowString()
 		a.Enabled = false
@@ -344,4 +349,5 @@ func (s *Store) Audit() []Audit {
 func (s *Store) Purge() {
 	_, _ = s.db.Exec("DELETE FROM observations WHERE observed_at < ?", time.Now().Add(-15*24*time.Hour).Unix())
 	_, _ = s.db.Exec("DELETE FROM audit WHERE at < ?", time.Now().Add(-90*24*time.Hour).UTC().Format(time.RFC3339))
+	_, _ = s.db.Exec("DELETE FROM operations WHERE kind IN ('event','delivery') AND at < ?", time.Now().Add(-90*24*time.Hour).Unix())
 }

@@ -10,12 +10,24 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
 )
 
+type RoutingOptions struct {
+	AssetIDs     []string `json:"assetIds"`
+	Environments []string `json:"environments"`
+	Tags         []string `json:"tags"`
+	RuleIDs      []string `json:"ruleIds"`
+	GroupSeconds int      `json:"groupSeconds"`
+	Summary      string   `json:"summary"`
+	SummaryHour  int      `json:"summaryHour"`
+}
+
 type Integration struct {
+	RoutingOptions
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	Provider   string   `json:"provider"`
@@ -32,6 +44,7 @@ type Integration struct {
 	Pending    int      `json:"pending"`
 }
 type IntegrationInput struct {
+	RoutingOptions
 	ID         string   `json:"id"`
 	Name       string   `json:"name"`
 	Provider   string   `json:"provider"`
@@ -43,16 +56,21 @@ type IntegrationInput struct {
 	Token      *string  `json:"token"`
 }
 type NotificationEvent struct {
-	ID          string             `json:"id"`
-	RuleID      string             `json:"ruleId"`
-	AssetID     string             `json:"assetId"`
-	AssetName   string             `json:"assetName"`
-	Environment string             `json:"environment"`
-	Title       string             `json:"title"`
-	Severity    string             `json:"severity"`
-	Status      string             `json:"status"`
-	At          string             `json:"at"`
-	Values      map[string]float64 `json:"values"`
+	ID          string              `json:"id"`
+	RuleID      string              `json:"ruleId"`
+	AssetID     string              `json:"assetId"`
+	AssetName   string              `json:"assetName"`
+	Environment string              `json:"environment"`
+	Title       string              `json:"title"`
+	Severity    string              `json:"severity"`
+	Status      string              `json:"status"`
+	At          string              `json:"at"`
+	Values      map[string]float64  `json:"values"`
+	Tags        []string            `json:"tags,omitempty"`
+	Condition   string              `json:"condition,omitempty"`
+	DetailURL   string              `json:"detailUrl,omitempty"`
+	Members     []NotificationEvent `json:"members,omitempty"`
+	SummaryText string              `json:"summaryText,omitempty"`
 }
 type notificationDelivery struct {
 	ID       string
@@ -67,6 +85,7 @@ type storedIntegration struct {
 	Token       string
 	Active      map[string]NotificationEvent
 	Queue       []notificationDelivery
+	LastSummary string
 }
 
 // URLs may contain webhook credentials. The complete record, including the
@@ -139,6 +158,9 @@ func (s *Store) Integrations() ([]Integration, error) {
 }
 func validateIntegration(record storedIntegration) error {
 	i := record.Integration
+	if err := validateRouting(i.RoutingOptions); err != nil {
+		return err
+	}
 	if strings.TrimSpace(i.Name) == "" || len([]rune(i.Name)) > 120 || strings.ContainsAny(i.Name, "\x00\r\n") {
 		return errors.New("연동 이름은 120자 이내로 입력하세요")
 	}
@@ -202,6 +224,7 @@ func (s *Store) SaveIntegration(input IntegrationInput) (Integration, error) {
 	old := record
 	i := record.Integration
 	i.ID, i.Name, i.Provider, i.Enabled, i.Severities, i.Recovery = input.ID, strings.TrimSpace(input.Name), input.Provider, input.Enabled, input.Severities, input.Recovery
+	i.RoutingOptions = input.RoutingOptions
 	i.Version++
 	record.Integration = i
 	if input.URL != nil {
@@ -215,8 +238,12 @@ func (s *Store) SaveIntegration(input IntegrationInput) (Integration, error) {
 	}
 	// A changed destination/filter starts a new subscription; never send old
 	// pending messages to a replacement endpoint or a disabled subscription.
-	if old.URL != record.URL || old.Token != record.Token || old.Integration.Provider != i.Provider || old.Integration.Enabled != i.Enabled || strings.Join(old.Integration.Severities, ",") != strings.Join(i.Severities, ",") || old.Integration.Recovery != i.Recovery {
+	if old.URL != record.URL || old.Token != record.Token || old.Integration.Provider != i.Provider || old.Integration.Enabled != i.Enabled || strings.Join(old.Integration.Severities, ",") != strings.Join(i.Severities, ",") || old.Integration.Recovery != i.Recovery || !reflect.DeepEqual(old.Integration.RoutingOptions, i.RoutingOptions) {
+		for _, d := range record.Queue {
+			_ = s.historyLocked(old.Integration, d, "cancelled", "수신 설정 변경으로 취소됨", time.Now().Unix())
+		}
 		record.Active, record.Queue = map[string]NotificationEvent{}, []notificationDelivery{}
+		record.LastSummary = ""
 		record.Integration.LastAt, record.Integration.LastError, record.Integration.LastStatus = "", "", ""
 	}
 	if err = s.putIntegrationLocked(record); err != nil {
@@ -227,6 +254,15 @@ func (s *Store) SaveIntegration(input IntegrationInput) (Integration, error) {
 func (s *Store) DeleteIntegration(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	all, e := s.integrationsLocked()
+	if e != nil {
+		return e
+	}
+	if record, ok := all[id]; ok {
+		for _, d := range record.Queue {
+			_ = s.historyLocked(record.Integration, d, "cancelled", "수신 연동 삭제로 취소됨", time.Now().Unix())
+		}
+	}
 	result, err := s.db.Exec("DELETE FROM integrations WHERE id=?", id)
 	if err != nil {
 		return err
@@ -240,6 +276,19 @@ func (s *Store) DeleteIntegration(id string) error {
 func (s *Store) forgetAssetNotifications(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	raw, e := s.operationsLocked("event")
+	if e == nil {
+		for _, b := range raw {
+			var v EventRecord
+			if json.Unmarshal(b, &v) == nil && v.Event.AssetID == id && v.ResolvedAt == "" {
+				v.ResolvedAt = nowString()
+				v.Event.Status = "cancelled"
+				v.UpdatedAt = v.ResolvedAt
+				v.Version++
+				_ = s.putOperationLocked("event", v.ID, time.Now().Unix(), v)
+			}
+		}
+	}
 	all, err := s.integrationsLocked()
 	if err != nil {
 		return
@@ -254,6 +303,8 @@ func (s *Store) forgetAssetNotifications(id string) {
 		for _, delivery := range record.Queue {
 			if delivery.Event.AssetID != id {
 				queue = append(queue, delivery)
+			} else {
+				_ = s.historyLocked(record.Integration, delivery, "cancelled", "인프라 수집 중지·설정 변경으로 취소됨", time.Now().Unix())
 			}
 		}
 		record.Queue = queue
@@ -278,6 +329,14 @@ func appendDelivery(record *storedIntegration, event NotificationEvent, at int64
 func (s *Store) queueNotifications(asset Asset, current map[string]NotificationEvent, recoverable map[string]bool, at int64, latestValues ...map[string]float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for key, event := range current {
+		event.Tags = asset.Tags
+		event.DetailURL = notificationDetailURL(event.RuleID)
+		current[key] = event
+	}
+	if err := s.journalLocked(asset, current, recoverable, at); err != nil {
+		return err
+	}
 	all, err := s.integrationsLocked()
 	if err != nil {
 		return err
@@ -290,10 +349,15 @@ func (s *Store) queueNotifications(asset Asset, current map[string]NotificationE
 			record.Active = map[string]NotificationEvent{}
 		}
 		for key, event := range current {
-			if _, exists := record.Active[key]; exists || !subscribed(record.Integration, event.Severity) {
+			if _, exists := record.Active[key]; exists || !routeMatches(record.Integration, event) || s.mutedLocked(event, at) {
 				continue
 			}
 			if appendDelivery(&record, event, at) {
+				n := len(record.Queue) - 1
+				record.Queue[n].Next += int64(record.Integration.GroupSeconds)
+				if err = s.historyLocked(record.Integration, record.Queue[n], "queued", "", at); err != nil {
+					return err
+				}
 				record.Active[key] = event
 			}
 		}
@@ -308,7 +372,7 @@ func (s *Store) queueNotifications(asset Asset, current map[string]NotificationE
 			if _, active := current[key]; active || !recoverable[event.RuleID] {
 				continue
 			}
-			if record.Integration.Recovery {
+			if record.Integration.Recovery && !s.mutedLocked(event, at) {
 				event.Status, event.At = "resolved", time.Unix(at, 0).UTC().Format(time.RFC3339)
 				prior := event.Values
 				event.Values = map[string]float64{}
@@ -322,6 +386,9 @@ func (s *Store) queueNotifications(asset Asset, current map[string]NotificationE
 				if !appendDelivery(&record, event, at) {
 					continue
 				}
+				if err = s.historyLocked(record.Integration, record.Queue[len(record.Queue)-1], "queued", "", at); err != nil {
+					return err
+				}
 			}
 			delete(record.Active, key)
 		}
@@ -333,9 +400,37 @@ func (s *Store) queueNotifications(asset Asset, current map[string]NotificationE
 }
 
 func notificationPayload(provider string, event NotificationEvent) any {
-	status := map[string]string{"firing": "발생", "resolved": "복구", "test": "테스트"}[event.Status]
+	status := map[string]string{"firing": "발생", "resolved": "복구", "test": "테스트", "summary": "운영 요약"}[event.Status]
 	severity := map[string]string{"critical": "긴급", "warning": "주의", "notice": "안내"}[event.Severity]
 	text := fmt.Sprintf("[Pulse Ops · %s · %s] %s\n대상: %s · %s\n시각: %s", status, severity, event.Title, event.AssetName, event.Environment, event.At)
+	if len(event.Members) > 0 {
+		names := []string{}
+		for _, e := range event.Members {
+			names = append(names, e.AssetName)
+		}
+		text += fmt.Sprintf("\n묶음 %d건: %s", len(event.Members), strings.Join(names, " · "))
+	}
+	if event.Condition != "" {
+		text += "\n조건: " + event.Condition
+	}
+	keys := []string{}
+	for key := range event.Values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if event.Status == "summary" {
+			continue
+		}
+		label, unit := metricLabel(key)
+		text += fmt.Sprintf("\n%s: %.4g %s", label, event.Values[key], unit)
+	}
+	if event.SummaryText != "" {
+		text += "\n" + event.SummaryText
+	}
+	if event.DetailURL != "" {
+		text += "\n상세: " + event.DetailURL
+	}
 	// Bound messages for Discord's 2000-character limit and Teams card sizes.
 	if r := []rune(text); len(r) > 1800 {
 		text = string(r[:1800])
@@ -399,8 +494,9 @@ func (s *Service) deliverNotifications(ctx context.Context) {
 		return
 	}
 	type job struct {
-		record   storedIntegration
-		delivery notificationDelivery
+		record     storedIntegration
+		deliveries []notificationDelivery
+		event      NotificationEvent
 	}
 	jobs := []job{}
 	now := time.Now().Unix()
@@ -409,17 +505,74 @@ func (s *Service) deliverNotifications(ctx context.Context) {
 			continue
 		}
 		blocked := map[string]bool{}
+		eligible := []notificationDelivery{}
+		s.store.mu.Lock()
+		latest, e := s.store.integrationsLocked()
+		live, ok := latest[record.Integration.ID]
+		if e != nil || !ok || !live.Integration.Enabled {
+			s.store.mu.Unlock()
+			continue
+		}
+		record = live
+		kept := []notificationDelivery{}
 		for _, delivery := range record.Queue {
+			muted := s.store.mutedLocked(delivery.Event, now)
+			if delivery.Event.Status == "summary" {
+				assets, _ := s.store.allLocked()
+				list := []Asset{}
+				for _, a := range assets {
+					list = append(list, a.Asset)
+				}
+				muted = s.store.summaryMutedLocked(record.Integration, list, now)
+			}
+			if muted {
+				_ = s.store.historyLocked(record.Integration, delivery, "suppressed", "음소거·점검 시간", now)
+				if delivery.Event.Status == "firing" {
+					delete(record.Active, delivery.Event.RuleID+":"+delivery.Event.AssetID)
+				}
+				continue
+			}
+			kept = append(kept, delivery)
 			key := delivery.Event.ID
 			if blocked[key] {
 				continue
 			}
 			blocked[key] = true
 			if delivery.Next <= now {
-				jobs = append(jobs, job{record, delivery})
-				break
+				eligible = append(eligible, delivery)
 			}
 		}
+		if len(kept) != len(record.Queue) {
+			record.Queue = kept
+			_ = s.store.putIntegrationLocked(record)
+		}
+		s.store.mu.Unlock()
+		if len(eligible) == 0 {
+			continue
+		}
+		first := eligible[0]
+		batch := []notificationDelivery{first}
+		event := first.Event
+		if record.Integration.GroupSeconds > 0 && event.Status == "firing" {
+			for _, d := range eligible[1:] {
+				if len(batch) >= 30 {
+					break
+				}
+				if d.Event.Status == event.Status && d.Event.RuleID == event.RuleID && d.Event.Environment == event.Environment && d.Event.Severity == event.Severity && d.Attempts == first.Attempts {
+					batch = append(batch, d)
+				}
+			}
+			if len(batch) > 1 {
+				event.ID = "group:" + first.ID
+				event.Members = []NotificationEvent{}
+				for _, d := range batch {
+					event.Members = append(event.Members, d.Event)
+				}
+				event.AssetName = fmt.Sprintf("%d개 인프라", len(batch))
+				event.AssetID = ""
+			}
+		}
+		jobs = append(jobs, job{record, batch, event})
 	}
 	// At most four outbound requests at a time, independent of collection slots.
 	for start := 0; start < len(jobs); start += 4 {
@@ -428,9 +581,26 @@ func (s *Service) deliverNotifications(ctx context.Context) {
 			go func(j job) {
 				defer func() { done <- struct{}{} }()
 				requestCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-				err := sendNotification(requestCtx, http.DefaultClient, j.record, j.delivery.Event)
+				// Recheck version and mute state immediately before starting the request.
+				s.store.mu.Lock()
+				latest, e := s.store.integrationsLocked()
+				live, ok := latest[j.record.Integration.ID]
+				valid := e == nil && ok && live.Integration.Enabled && live.Integration.Version == j.record.Integration.Version
+				for _, d := range j.deliveries {
+					if s.store.mutedLocked(d.Event, time.Now().Unix()) {
+						valid = false
+					}
+				}
+				s.store.mu.Unlock()
+				if !valid {
+					cancel()
+					return
+				}
+				err := sendNotification(requestCtx, http.DefaultClient, j.record, j.event)
 				cancel()
-				s.store.finishDelivery(j.record.Integration, j.delivery.ID, err, time.Now().Unix())
+				for _, d := range j.deliveries {
+					s.store.finishDelivery(j.record.Integration, d.ID, err, time.Now().Unix())
+				}
 			}(j)
 		}
 		for count := 0; count < min(4, len(jobs)-start); count++ {
@@ -469,6 +639,7 @@ func (s *Store) finishDelivery(integration Integration, id string, result error,
 			record.Queue[index] = delivery
 		}
 		if s.putIntegrationLocked(record) == nil {
+			_ = s.historyLocked(integration, delivery, i.LastStatus, i.LastError, at)
 			s.Record(integration.ID, "notification."+delivery.Event.Status, i.LastStatus)
 		}
 		return
@@ -482,6 +653,7 @@ func (s *Service) runNotifications(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			s.queueSummaries(time.Now())
 			s.deliverNotifications(ctx)
 		}
 	}
@@ -502,8 +674,52 @@ func (s *Store) recordNotificationTest(i Integration, result error) {
 		record.Integration.LastStatus, record.Integration.LastError = "failed", result.Error()
 	}
 	_ = s.putIntegrationLocked(record)
+	event := NotificationEvent{ID: ID(), RuleID: "test", Title: "이벤트 알림 연동 테스트", Severity: "notice", Status: "test", AssetName: "Pulse Ops", Environment: "테스트", At: nowString(), Values: map[string]float64{}}
+	_ = s.historyLocked(i, notificationDelivery{ID: ID(), Event: event, Attempts: 1, Created: time.Now().Unix()}, record.Integration.LastStatus, record.Integration.LastError, time.Now().Unix())
 }
 func (s *Service) installIntegrationAPI(api *http.ServeMux) {
+	api.HandleFunc("GET /integrations/{id}/preview", func(w http.ResponseWriter, r *http.Request) {
+		items, err := s.store.Integrations()
+		var i Integration
+		found := false
+		for _, item := range items {
+			if item.ID == r.PathValue("id") {
+				i = item
+				found = true
+				break
+			}
+		}
+		if err != nil || !found {
+			fail(w, 404, "등록된 연동이 없습니다")
+			return
+		}
+		event := NotificationEvent{ID: "preview", RuleID: "node-cpu", Title: "메시지 예시 · CPU 사용률", Severity: "warning", Status: "firing", AssetName: "예시 대상", Environment: "production", At: nowString(), Condition: "CPU 사용률 > 80% · 5분", Values: map[string]float64{"node-cpu": 85}, DetailURL: notificationDetailURL("node-cpu")}
+		records, _ := operationList[EventRecord](s.store, "event")
+		sort.Slice(records, func(a, b int) bool { return records[a].UpdatedAt > records[b].UpdatedAt })
+		sample := true
+		for _, v := range records {
+			if routeMatches(i, v.Event) {
+				event = v.Event
+				sample = false
+				break
+			}
+		}
+		writeJSON(w, 200, map[string]any{"sample": sample, "event": event, "payload": notificationPayload(i.Provider, event)})
+	})
+	api.HandleFunc("POST /integrations/{id}/clone", func(w http.ResponseWriter, r *http.Request) {
+		items, err := s.store.Integrations()
+		if err != nil {
+			fail(w, 503, "목록을 읽을 수 없습니다")
+			return
+		}
+		for _, i := range items {
+			if i.ID == r.PathValue("id") {
+				writeJSON(w, 200, IntegrationInput{Name: i.Name + " 복사", Provider: i.Provider, Severities: i.Severities, Recovery: i.Recovery, RoutingOptions: i.RoutingOptions})
+				return
+			}
+		}
+		fail(w, 404, "연동이 없습니다")
+	})
 	api.HandleFunc("GET /integrations", func(w http.ResponseWriter, r *http.Request) {
 		items, err := s.store.Integrations()
 		if err != nil {

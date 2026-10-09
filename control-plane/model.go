@@ -28,6 +28,7 @@ type Asset struct {
 	OS                string    `json:"os"`
 	MetricsURL        string    `json:"metricsUrl"`
 	Environment       string    `json:"environment"`
+	Tags              []string  `json:"tags"`
 	SSH               SSHConfig `json:"ssh"`
 	Dependencies      []string  `json:"dependencies"`
 	Enabled           bool      `json:"enabled"`
@@ -82,6 +83,9 @@ func publicAsset(s StoredAsset) Asset {
 	if a.Dependencies == nil {
 		a.Dependencies = []string{}
 	}
+	if a.Tags == nil {
+		a.Tags = []string{}
+	}
 	return a
 }
 func validHost(host string) bool {
@@ -102,6 +106,9 @@ func validHost(host string) bool {
 	return true
 }
 func validateAsset(a Asset, all map[string]StoredAsset) error {
+	if err := validateLabels(a.Tags, 20); err != nil {
+		return err
+	}
 	if a.Kind != "server" && a.Kind != "application" && !isSQLDatabase(a.Kind) && a.Kind != "redis" && a.Kind != "http" {
 		return errors.New("지원하는 인프라 종류를 선택하세요")
 	}

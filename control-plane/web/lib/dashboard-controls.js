@@ -1,6 +1,7 @@
 import {esc, icon} from '../ui.js';
 
-const matches = (asset, query) => `${asset.name} ${asset.address || ''}`.toLowerCase().includes(query.toLowerCase());
+import {assetSearchText} from '../operations.js';
+const matches = (asset, query) => assetSearchText(asset).includes(query.toLowerCase());
 export function infrastructurePicker(assets, selected, query = '') {
     query = assets.length > 12 ? query : '';
     const visible = assets.filter(asset => matches(asset, query));
@@ -8,7 +9,7 @@ export function infrastructurePicker(assets, selected, query = '') {
     return `<div class="quick-scopes" role="group" aria-label="인프라 선택">
         ${assets.length > 12 ? `<label class="search-field">${icon('search')}<input id="asset-search" aria-label="인프라 검색" placeholder="인프라 검색" value="${esc(query)}"></label>` : ''}
         <div class="scope-buttons"><button id="scope-all" class="scope-chip scope-all" data-scope-all aria-pressed="${all}" aria-label="${all ? '전체 선택 해제' : '전체 선택'}" ${visible.length ? '' : 'disabled'}>전체</button>
-        ${assets.map(asset => `<button id="scope-${esc(asset.id)}" class="scope-chip" data-scope="${esc(asset.id)}" data-search="${esc(`${asset.name} ${asset.address || ''}`.toLowerCase())}" aria-pressed="${selected.includes(asset.id)}" title="${esc(asset.name)}" ${matches(asset, query) ? '' : 'hidden'}><i class="${esc(asset.status)}" aria-hidden="true"></i><span>${esc(asset.name)}</span></button>`).join('')}</div></div>`;
+        ${assets.map(asset => `<button id="scope-${esc(asset.id)}" class="scope-chip" data-scope="${esc(asset.id)}" data-search="${esc(assetSearchText(asset))}" aria-pressed="${selected.includes(asset.id)}" title="${esc(asset.name)}" ${matches(asset, query) ? '' : 'hidden'}><i class="${esc(asset.status)}" aria-hidden="true"></i><span>${esc(asset.name)}</span></button>`).join('')}</div></div>`;
 }
 export function bindInfrastructurePicker(root, assets, read, change, searchChanged = () => {}) {
     const commit = (ids, focusId) => {
