@@ -44,15 +44,54 @@ export function observedForAsset(snapshot, metricId, assetId) {
     return !!snapshot.metrics.find(m => m.id === metricId)?.series.some(s => s.labels.assetId === assetId && s.points.some(p => p.value !== null));
 }
 export function metricRecipes(snapshot, ids, definitions) {
-    return definitions.flatMap(metric => {
+    return arrangeFamilies(definitions.flatMap(metric => {
         const parts = chartGroups(comparisonLines(snapshot, ids, [metric.id]));
         return (parts.length ? parts : [[]]).map((lines, index) => ({
             title: metric.title + (index ? ' · ' + (index + 1) : ''),
             subtitle: metric.description, assetIds: ids, metricIds: [metric.id],
             keys: lines.length ? lines.map(line => line.key) : undefined,
-            metric, unit: metric.unit, warning: metric.warning,
+            metric, unit: metric.unit, warning: metric.warning, part: index,
         }));
-    });
+    }));
+}
+// One quantity measured at several percentiles, windows, directions or policies.
+// Members share a unit and read best side by side on one axis.
+export const metricFamilies = [
+    { id: 'latency', title: '응답 시간 분포', members: [['p50', 'P50'], ['p95', 'P95'], ['p97', 'P97'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['latency-mean', '평균']] },
+    { id: 'outcome-latency', title: '성공·실패 요청 P99', members: [['success-latency', '성공'], ['failed-latency', '실패']] },
+    { id: 'event-loop', title: '이벤트 루프 지연', members: [['loop-p99', 'P99'], ['loop-max', '최대']] },
+    { id: 'slo-burn', title: '오류 예산 소진 속도', members: [['slo-burn', '5분'], ['slo-burn-hour', '1시간']] },
+    { id: 'network', title: '네트워크 송수신', members: [['network-in', '수신'], ['network-out', '송신']] },
+    { id: 'db-network', title: 'DB 송수신', members: [['db-network-in', '수신'], ['db-network-out', '송신']] },
+    { id: 'cookie-policy', title: '세션 쿠키 정책', members: [['cookie-secure', 'Secure'], ['cookie-http', 'HttpOnly'], ['cookie-samesite', 'SameSite']] },
+];
+const familyMembers = new Map(metricFamilies.flatMap(family => family.members.map(([id, label], index) => [id, { family, label, index }])));
+const memberOf = recipe => recipe.metricIds.length === 1 ? familyMembers.get(recipe.metricIds[0]) : undefined;
+// A family row sits where its first member would, one row per split part, in
+// family order. A family with one present member stays an ordinary chart.
+// Titles and keys are untouched so saved merges and refresh periods still match.
+export function arrangeFamilies(recipes) {
+    const present = new Map();
+    for (const recipe of recipes) {
+        const member = memberOf(recipe);
+        if (member)
+            present.set(member.family.id, new Set([...(present.get(member.family.id) || []), recipe.metricIds[0]]));
+    }
+    const rows = new Map(), result = [];
+    for (const recipe of recipes) {
+        const member = memberOf(recipe);
+        if (!member || present.get(member.family.id).size < 2) {
+            result.push(recipe);
+            continue;
+        }
+        const part = recipe.part || 0, row = `${member.family.id}:${part}`;
+        if (!rows.has(row)) {
+            rows.set(row, []);
+            result.push(rows.get(row));
+        }
+        rows.get(row).push({ ...recipe, family: { id: member.family.id, row, title: member.family.title + (part ? ' · ' + (part + 1) : ''), label: member.label, index: member.index } });
+    }
+    return result.flatMap(item => Array.isArray(item) ? item.sort((a, b) => a.family.index - b.family.index) : [item]);
 }
 // The overview is deliberately small. Full collection and event evidence use
 // metricsForAsset/eventMetricIds and never inherit this display filter.
@@ -70,10 +109,10 @@ const dashboardOrder = [...new Set(Object.values(dashboardMetrics).flat())];
 // A dashboard chart belongs to a metric; each eligible asset keeps its own line.
 export function dashboardRecipes(snapshot, ids) {
     const selected = snapshot.assets.filter(asset => ids.includes(asset.id));
-    return dashboardOrder.flatMap(id => {
+    return arrangeFamilies(dashboardOrder.flatMap(id => {
         const owners = selected.filter(asset => (dashboardMetrics[asset.kind] || []).includes(id) && observedForAsset(snapshot, id, asset.id));
         return owners.length ? metricRecipes(snapshot, owners.map(asset => asset.id), [metricById.get(id)]).map(recipe => ({...recipe, subtitle: undefined})) : [];
-    });
+    }));
 }
 export function relatedAssets(snapshot, rootIds) {
     const byId = new Map(snapshot.assets?.map(a => [a.id, a]) || []), seen = new Set(), pending = [...rootIds];
@@ -113,7 +152,7 @@ export function comparisonLines(snapshot, ids, metricIds) {
             if (!allowed.has(series.labels.assetId) || !series.points.some(p => p.value !== null))
                 continue;
             const assetName = series.labels.name || series.labels.assetId;
-            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points });
+            lines.push({ key: `${id}:${series.labels.assetId}`, metricId: id, assetId: series.labels.assetId, assetName, name: `${assetName} · ${metric.title}`, unit: metric.unit, points: series.points });
         }
     }
     return lines;
