@@ -118,6 +118,11 @@ export function dashboardRecipes(snapshot, ids) {
         return owners.length ? metricRecipes(snapshot, owners.map(asset => asset.id), [metricById.get(id)]).map(recipe => ({...recipe, subtitle: undefined})) : [];
     }));
 }
+// CPU, RAM and disk at the top are server metrics: the servers a selection leaves out entirely.
+export function unselectedServers(assets, ids) {
+    const servers = assets.filter(asset => asset.kind === 'server');
+    return ids.length && !servers.some(asset => ids.includes(asset.id)) ? servers : [];
+}
 export function relatedAssets(snapshot, rootIds) {
     const byId = new Map(snapshot.assets?.map(a => [a.id, a]) || []), seen = new Set(), pending = [...rootIds];
     while (pending.length) {
