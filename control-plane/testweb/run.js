@@ -5,6 +5,7 @@ import './databases.test.js';
 import './workspace.test.js';
 import './board.test.js';
 import './chart-layout.test.js';
+import './chart-scale.test.js';
 import {esc} from '/assets/ui.js';
 import {scopeSnapshot} from '/assets/lib/assets.js';
 import {ruleState} from '/assets/lib/rule-catalog.js';

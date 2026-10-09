@@ -1,6 +1,7 @@
 import {comparisonLines,chartRows,chartGroups} from './lib/board.js';
 import {recipeKey,readLayout,mergeLayout,activeGroups,removeGroup,refreshPeriod,refreshDue} from './lib/chart-layout.js';
 import {formatNumber} from './lib/rules.js';
+import {axisScale,formatAxisTick,axisRangeLabel} from './lib/chart-scale.js';
 import {esc,icon,shortTime,fullTime,preference,savePreference} from './ui.js';
 
 const palette=['#b5a1ff','#63d9bd','#6dbafb','#f3bc77','#ef8eae','#cbd376','#c39beb','#71cad2'];
@@ -92,11 +93,14 @@ class CanvasChart {
  draw(){
   this.dimensions();const ctx=this.canvas.getContext('2d');ctx.clearRect(0,0,this.width,this.height);if(!this.lines.length)return;
   ctx.font='11px system-ui';ctx.fillStyle='#a2acc0';ctx.lineWidth=1;this.scales={};
-  this.units.forEach((unit,axis)=>{const values=this.lines.filter(l=>l.unit===unit&&!this.hidden.has(l.key)).flatMap(l=>l.points.filter(p=>p.value!==null&&p.time>=this.snapshot.start&&p.time<=this.snapshot.end).map(p=>p.value));
-   let low=unit==='0/1'?0:Math.min(0,...values),high=unit==='0/1'?1:Math.max(0,...values);if(low===high)high=low+1;const span=high-low;if(unit!=='0/1')high+=span*.05;
-   this.scales[unit]={low,high};ctx.textAlign=axis?'left':'right';
-   for(let i=0;i<=4;i++){const y=12+this.plotHeight*(1-i/4),v=low+(high-low)*i/4;if(!axis){ctx.strokeStyle='#303746';ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(52,y);ctx.lineTo(52+this.plotWidth,y);ctx.stroke()}if(unit!=='0/1'||i===0||i===4){ctx.fillStyle='#98a3b8';ctx.fillText(Math.abs(v)>9999?format(v/1000)+'k':format(v),axis?58+this.plotWidth:45,y+4)}}
+  this.units.forEach((unit,axis)=>{const scale=axisScale(this.lines,unit,this.snapshot.start,this.snapshot.end,this.hidden),{low,high}=scale;
+   this.scales[unit]=scale;ctx.textAlign=axis?'left':'right';
+   for(let i=0;i<=4;i++){const y=12+this.plotHeight*(1-i/4),v=low+(high-low)*i/4;if(!axis){ctx.strokeStyle='#303746';ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(52,y);ctx.lineTo(52+this.plotWidth,y);ctx.stroke()}if(unit!=='0/1'||i===0||i===4){ctx.fillStyle='#98a3b8';ctx.fillText(formatAxisTick(v,scale),axis?58+this.plotWidth:45,y+4)}}
   });
+  const ranges=this.units.map(unit=>axisRangeLabel(this.scales[unit]));
+  const rangeLabel=ranges.length>1?`왼쪽 ${ranges[0]} · 오른쪽 ${ranges[1]}`:ranges[0];
+  this.node.querySelector('.board-chart-meta').innerHTML=`<span>${esc(rangeLabel)}</span><span>${this.lines.length}개 시계열 · 동일 시간축</span>`;
+  this.canvas.setAttribute('aria-label',`${this.recipe.title}. ${rangeLabel}. 좌우 방향키로 시각 탐색`);
   ctx.setLineDash([]);ctx.textAlign='center';ctx.fillStyle='#98a3b8';const ticks=this.width<400?3:4;
   for(let i=0;i<=ticks;i++){const t=this.snapshot.start+(this.snapshot.end-this.snapshot.start)*i/ticks;ctx.fillText(shortTime(t),52+this.plotWidth*i/ticks,this.height-6)}
   ctx.save();ctx.beginPath();ctx.rect(52,8,this.plotWidth,this.plotHeight+8);ctx.clip();
