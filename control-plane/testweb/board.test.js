@@ -75,7 +75,7 @@ test('dashboard keeps operational signals while full collection and event eviden
     ]);
     const before = structuredClone(s), incidents = registeredIncidents(s);
     const recipes = dashboardRecipes(s, ['api-a', 'host']);
-    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p99', 'errors', 'node-cpu', 'memory-host', 'disk']);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['requests', undefined], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['errors', undefined], ['node-cpu', undefined], ['memory-host', undefined], ['disk', undefined]]);
     assert.deepEqual(recipes.find(r => r.metricIds[0] === 'p99').keys, ['p99:api-a']);
     assert.ok(metricsForAsset(s, s.assets[0]).some(m => m.id === 'cookie-expiry'));
     assert.ok(metricsForAsset(s, s.assets[3]).some(m => m.id === 'uptime'));
@@ -193,6 +193,14 @@ test('dashboard groups server receive and send traffic into one row per selected
     const recipes = dashboardRecipes(s, ['host-a', 'host-b']);
     assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row]), [['node-cpu', undefined], ['memory-host', undefined], ['network-in', 'network:0'], ['network-out', 'network:0']]);
     assert.ok(dashboardRecipes(snapshot([metric('network-in', { host: 1 })]), ['host']).every(r => !r.family));
+});
+test('application dashboard shows P50, P95, P97, P99 and P99.9 as one latency row without the mean', () => {
+    const s = snapshot(['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'latency-mean', 'errors'].map(id => metric(id, { 'api-a': 10, 'api-b': 20 })));
+    const recipes = dashboardRecipes(s, ['api-a', 'api-b']);
+    const row = recipes.filter(r => r.family);
+    assert.deepEqual(row.map(r => r.family.label), ['P50', 'P95', 'P97', 'P99', 'P99.9']);
+    assert.ok(row.every(r => r.family.row === 'latency:0' && r.title.startsWith('응답 시간 · ')));
+    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors']);
 });
 test('server dashboard shows process CPU, RAM and disk capacity with total, used and free on one axis', () => {
     const s = snapshot(['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'uptime', 'swap'].map(id => metric(id, { host: 10 })));

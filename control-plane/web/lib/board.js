@@ -97,7 +97,7 @@ export function arrangeFamilies(recipes) {
 // The overview is deliberately small. Full collection and event evidence use
 // metricsForAsset/eventMetricIds and never inherit this display filter.
 export const dashboardMetrics = {
-    application: ['requests', 'p99', 'errors', 'cpu', 'memory'],
+    application: ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory'],
     server: ['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'network-in', 'network-out'],
     postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
     mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
@@ -107,7 +107,7 @@ export const dashboardMetrics = {
     http: ['probe-latency'],
 };
 // CPU and memory read together when applications and servers are selected at once.
-const dashboardOrder = [...new Set(['requests', 'p99', 'errors', 'node-cpu', 'cpu', 'memory-host', 'memory', ...Object.values(dashboardMetrics).flat()])];
+const dashboardOrder = [...new Set(['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'node-cpu', 'cpu', 'memory-host', 'memory', ...Object.values(dashboardMetrics).flat()])];
 // A dashboard chart belongs to a metric; each eligible asset keeps its own line.
 export function dashboardRecipes(snapshot, ids) {
     const selected = snapshot.assets.filter(asset => ids.includes(asset.id));
