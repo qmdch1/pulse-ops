@@ -124,7 +124,7 @@ func TestMetricResultsNullZeroFreshnessAndScope(t *testing.T) {
 	for _, r := range results {
 		byID[r.ID] = r
 	}
-	if len(results) != 119 {
+	if len(results) != 121 {
 		t.Fatalf("catalog count %d", len(results))
 	}
 	p := byID["p99"]
@@ -168,7 +168,7 @@ func TestMonitoringValidationAndEmbeddedCatalog(t *testing.T) {
 	}
 	w := get("/api/monitoring?range=900")
 	var body snapshot
-	if json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.Connected || len(body.Metrics) != 119 || body.Assets == nil {
+	if json.Unmarshal(w.Body.Bytes(), &body) != nil || !body.Connected || len(body.Metrics) != 121 || body.Assets == nil {
 		t.Fatal("empty registry contract invalid")
 	}
 }

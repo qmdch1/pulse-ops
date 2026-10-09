@@ -156,9 +156,14 @@ class CanvasChart {
  }
  draw(){
   this.dimensions();const ctx=this.canvas.getContext('2d');ctx.clearRect(0,0,this.width,this.height);if(!this.lines.length)return;
-  const left=this.left,steps=this.compact?2:4;ctx.font=this.compact?'10px system-ui':'11px system-ui';ctx.fillStyle='#a2acc0';ctx.lineWidth=1;this.scales={};
-  this.units.forEach((unit,axis)=>{const scale=this.row?.scale(unit)||axisScale(this.lines,unit,this.snapshot.start,this.snapshot.end,this.hidden),{low,high}=scale;
-   this.scales[unit]=scale;ctx.textAlign=axis?'left':'right';
+  const steps=this.compact?2:4;ctx.font=this.compact?'10px system-ui':'11px system-ui';ctx.fillStyle='#a2acc0';ctx.lineWidth=1;this.scales={};
+  for(const unit of this.units)this.scales[unit]=this.row?.scale(unit)||axisScale(this.lines,unit,this.snapshot.start,this.snapshot.end,this.hidden);
+  // Size each axis gutter to its widest tick so values like 1,006.85 are never clipped.
+  const widest=unit=>{const scale=this.scales[unit];return Math.max(...Array.from({length:steps+1},(_,i)=>ctx.measureText(formatAxisTick(scale.low+(scale.high-scale.low)*i/steps,scale)).width))};
+  this.left=Math.max(this.left,Math.ceil(widest(this.units[0]))+9);this.plotWidth=this.width-this.left-(this.units.length>1?Math.max(50,Math.ceil(widest(this.units[1]))+10):this.compact?12:15);
+  const left=this.left;
+  this.units.forEach((unit,axis)=>{const scale=this.scales[unit],{low,high}=scale;
+   ctx.textAlign=axis?'left':'right';
    for(let i=0;i<=steps;i++){const y=12+this.plotHeight*(1-i/steps),v=low+(high-low)*i/steps;if(!axis){ctx.strokeStyle='#303746';ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(left,y);ctx.lineTo(left+this.plotWidth,y);ctx.stroke()}if(unit!=='0/1'||i===0||i===steps){ctx.fillStyle='#98a3b8';ctx.fillText(formatAxisTick(v,scale),axis?left+6+this.plotWidth:left-7,y+4)}}
   });
   const ranges=this.units.map(unit=>axisRangeLabel(this.scales[unit]));

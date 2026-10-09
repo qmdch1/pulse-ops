@@ -33,7 +33,7 @@ const sources = {
     redis: ['Redis exporter'], http: ['Blackbox exporter'],
 };
 export function metricsForAsset(snapshot, asset) {
-    const directProfiles = { server: ['uptime', 'disk-free'], redis: ['redis-used', 'redis-clients', 'redis-commands'] };
+    const directProfiles = { server: ['uptime', 'cpu', 'disk-total', 'disk-used', 'disk-free'], redis: ['redis-used', 'redis-clients', 'redis-commands'] };
     const ids = new Set([...(databaseProfiles[asset.kind] || contextMetrics[asset.kind] || []), ...(directProfiles[asset.kind] || []), 'targets', 'targets-down', 'scrape-duration', 'scrape-age']);
     for (const m of snapshot.metrics)
         if (m.series.some(s => s.labels.assetId === asset.id && s.points.some(p => p.value !== null)))
@@ -61,6 +61,7 @@ export const metricFamilies = [
     { id: 'outcome-latency', title: '성공·실패 요청 P99', members: [['success-latency', '성공'], ['failed-latency', '실패']] },
     { id: 'event-loop', title: '이벤트 루프 지연', members: [['loop-p99', 'P99'], ['loop-max', '최대']] },
     { id: 'slo-burn', title: '오류 예산 소진 속도', members: [['slo-burn', '5분'], ['slo-burn-hour', '1시간']] },
+    { id: 'disk-capacity', title: '디스크 용량', members: [['disk-total', '전체'], ['disk-used', '사용'], ['disk-free', '남음']] },
     { id: 'network', title: '네트워크 송수신', members: [['network-in', '수신'], ['network-out', '송신']] },
     { id: 'db-network', title: 'DB 송수신', members: [['db-network-in', '수신'], ['db-network-out', '송신']] },
     { id: 'cookie-policy', title: '세션 쿠키 정책', members: [['cookie-secure', 'Secure'], ['cookie-http', 'HttpOnly'], ['cookie-samesite', 'SameSite']] },
@@ -97,7 +98,7 @@ export function arrangeFamilies(recipes) {
 // metricsForAsset/eventMetricIds and never inherit this display filter.
 export const dashboardMetrics = {
     application: ['requests', 'p99', 'errors', 'cpu', 'memory'],
-    server: ['node-cpu', 'memory-host', 'disk', 'network-in', 'network-out'],
+    server: ['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'network-in', 'network-out'],
     postgres: ['db-probe', 'db-transactions', 'db-connections', 'db-locks'],
     mysql: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
     mariadb: ['db-probe', 'db-statements', 'db-connection-usage', 'db-lock-waiters'],
@@ -105,7 +106,8 @@ export const dashboardMetrics = {
     redis: ['redis-probe', 'redis-commands', 'redis-used', 'redis-hit'],
     http: ['probe-latency'],
 };
-const dashboardOrder = [...new Set(Object.values(dashboardMetrics).flat())];
+// CPU and memory read together when applications and servers are selected at once.
+const dashboardOrder = [...new Set(['requests', 'p99', 'errors', 'node-cpu', 'cpu', 'memory-host', 'memory', ...Object.values(dashboardMetrics).flat()])];
 // A dashboard chart belongs to a metric; each eligible asset keeps its own line.
 export function dashboardRecipes(snapshot, ids) {
     const selected = snapshot.assets.filter(asset => ids.includes(asset.id));

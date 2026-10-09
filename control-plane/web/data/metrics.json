@@ -166,7 +166,7 @@
     "unit": "%",
     "axisMax": 100,
     "query": "max(app_process_cpu_percent{__SCOPE__})",
-    "description": "노드 평균에 가려지는 단일 프로세스 포화를 확인합니다. 멀티스레드는 100%를 넘을 수 있습니다.",
+    "description": "노드 평균에 가려지는 단일 프로세스 포화를 확인합니다. 멀티스레드는 100%를 넘을 수 있습니다. 서버는 SSH로 수집 주기 동안 가장 바쁜 프로세스의 CPU를 계산합니다.",
     "source": "Application",
     "warning": 85,
     "direction": "above"
@@ -208,11 +208,11 @@
   {
     "group": "resources",
     "id": "memory-host",
-    "title": "호스트 메모리 사용률",
+    "title": "호스트 RAM 사용률",
     "unit": "%",
     "axisMax": 100,
     "query": "max(100 * (1-node_memory_MemAvailable_bytes{__SCOPE__}/node_memory_MemTotal_bytes{__SCOPE__}))",
-    "description": "캐시를 포함한 free 대신 available을 사용합니다.",
+    "description": "물리 메모리(RAM) 중 사용 중인 비율입니다. 캐시를 포함한 free 대신 available을 사용합니다.",
     "source": "Node exporter",
     "warning": 90,
     "direction": "above"
@@ -231,12 +231,34 @@
   },
   {
     "group": "resources",
+    "id": "disk-total",
+    "title": "디스크 전체 용량",
+    "unit": "GiB",
+    "axisMax": 100,
+    "query": "max(node_filesystem_size_bytes{mountpoint=\"/\",__SCOPE__}) / 1024^3",
+    "description": "서버 루트(/) 마운트의 전체 용량입니다. Windows는 시스템 드라이브입니다.",
+    "source": "직접 수집",
+    "direction": "above"
+  },
+  {
+    "group": "resources",
+    "id": "disk-used",
+    "title": "디스크 사용량",
+    "unit": "GiB",
+    "axisMax": 100,
+    "query": "max(node_filesystem_size_bytes{mountpoint=\"/\",__SCOPE__} - node_filesystem_free_bytes{mountpoint=\"/\",__SCOPE__}) / 1024^3",
+    "description": "루트(/) 마운트에서 사용 중인 용량입니다. 예약 블록 때문에 사용량과 남은 용량의 합은 전체 용량보다 작을 수 있습니다.",
+    "source": "직접 수집",
+    "direction": "above"
+  },
+  {
+    "group": "resources",
     "id": "disk-free",
     "title": "남은 디스크",
     "unit": "GiB",
     "axisMax": 100,
     "query": "min(app_disk_free_bytes{__SCOPE__}) / 1024^3",
-    "description": "관측 대상 마운트의 여유 바이트입니다.",
+    "description": "관측 대상 마운트의 여유 용량입니다. 서버는 루트(/) 마운트, Windows는 시스템 드라이브입니다.",
     "source": "Application",
     "direction": "above"
   },

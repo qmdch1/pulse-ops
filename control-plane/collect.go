@@ -184,7 +184,7 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 		}
 	}
 	if osName == "windows" {
-		command := `powershell -NoProfile -NonInteractive -Command "$o=Get-CimInstance Win32_OperatingSystem;$c=Get-CimInstance Win32_Processor;$d=Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3';@{cpu=($c|Measure-Object LoadPercentage -Average).Average;memory=(100*(1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize));disk=($d|ForEach-Object {100*(1-$_.FreeSpace/$_.Size)}|Measure-Object -Maximum).Maximum}|ConvertTo-Json -Compress"`
+		command := `powershell -NoProfile -NonInteractive -Command "$o=Get-CimInstance Win32_OperatingSystem;$c=Get-CimInstance Win32_Processor;$d=Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3';$s=$d|Where-Object DeviceID -eq $env:SystemDrive|Select-Object -First 1;$t=$null;$u=$null;$f=$null;if($s -and $s.Size){$t=$s.Size/1GB;$u=($s.Size-$s.FreeSpace)/1GB;$f=$s.FreeSpace/1GB};$m=$null;try{$p=Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction Stop|Where-Object {$_.Name -notin '_Total','Idle'};if($p){$m=($p|Measure-Object PercentProcessorTime -Maximum).Maximum}}catch{};@{cpu=($c|Measure-Object LoadPercentage -Average).Average;memory=(100*(1-$o.FreePhysicalMemory/$o.TotalVisibleMemorySize));disk=($d|ForEach-Object {100*(1-$_.FreeSpace/$_.Size)}|Measure-Object -Maximum).Maximum;diskTotal=$t;diskUsed=$u;diskFree=$f;process=$m}|ConvertTo-Json -Compress"`
 		output, err := readCommand(ctx, connection, command)
 		if err != nil {
 			return nil, nil, errors.New("Windows 리소스 조회 권한 또는 PowerShell SSH 설정을 확인하세요")
@@ -193,7 +193,7 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 		if json.Unmarshal([]byte(output), &result) != nil {
 			return nil, nil, errors.New("Windows 수집 결과를 해석할 수 없습니다")
 		}
-		for id, key := range map[string]string{"node-cpu": "cpu", "memory-host": "memory", "disk": "disk"} {
+		for id, key := range map[string]string{"node-cpu": "cpu", "memory-host": "memory", "disk": "disk", "disk-total": "diskTotal", "disk-used": "diskUsed", "disk-free": "diskFree", "cpu": "process"} {
 			if value := result[key]; value != nil {
 				values[id] = *value
 			}
@@ -325,12 +325,66 @@ func (s *Service) collectSSH(ctx context.Context, record StoredAsset) (map[strin
 			values[id] = value
 		}
 	}
+	if output, err := readCommand(ctx, connection, linuxProcesses); err == nil {
+		s.mu.Lock()
+		last := s.processes[record.Asset.ID]
+		s.mu.Unlock()
+		value, ok, current := busiestProcess(output, last, time.Now())
+		s.mu.Lock()
+		s.processes[record.Asset.ID] = current
+		s.mu.Unlock()
+		if ok {
+			values["cpu"] = value
+		}
+	}
 	return values, raw, nil
 }
+
+// Per-process CPU ticks; the process name in /proc/<pid>/stat may hold spaces
+// and parentheses, so the greedy match strips everything up to the last ") ".
+const linuxProcesses = `LC_ALL=C; getconf CLK_TCK 2>/dev/null || echo 100; sed -E 's/^([0-9]+) \(.*\) /\1 /' /proc/[0-9]*/stat 2>/dev/null | awk '{print $1, $13+$14, $21}' | head -n 6000`
+
+type processSample struct {
+	At    time.Time
+	Ticks map[string]float64
+}
+
+// The busiest process over the collection interval, in percent of one core like
+// top. Only processes present in both samples count, and the start time keeps a
+// reused PID from being compared with a different process.
+func busiestProcess(output string, previous processSample, now time.Time) (float64, bool, processSample) {
+	current := processSample{At: now, Ticks: map[string]float64{}}
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	hz := parseNumber(lines[0])
+	if hz <= 0 {
+		hz = 100
+	}
+	for _, line := range lines[1:] {
+		if fields := strings.Fields(line); len(fields) == 3 {
+			current.Ticks[fields[0]+":"+fields[2]] = parseNumber(fields[1])
+		}
+	}
+	elapsed := now.Sub(previous.At).Seconds()
+	if len(previous.Ticks) == 0 || elapsed <= 0 || elapsed > 3900 {
+		return 0, false, current
+	}
+	busiest, found := 0.0, false
+	for key, ticks := range current.Ticks {
+		if old, ok := previous.Ticks[key]; ok && ticks >= old {
+			busiest, found = math.Max(busiest, 100*(ticks-old)/hz/elapsed), true
+		}
+	}
+	return busiest, found, current
+}
+
+// POSIX df -Pk: size, used and available in KiB. Reserved blocks keep
+// used + available below the size, so each is reported as measured.
 func parseDisk(line string, values map[string]float64) {
 	fields := strings.Fields(line)
 	if len(fields) >= 6 && strings.HasSuffix(fields[4], "%") {
 		values["disk"] = parseNumber(strings.TrimSuffix(fields[4], "%"))
+		values["disk-total"] = parseNumber(fields[1]) / 1024 / 1024
+		values["disk-used"] = parseNumber(fields[2]) / 1024 / 1024
 		values["disk-free"] = parseNumber(fields[3]) / 1024 / 1024
 	}
 }
