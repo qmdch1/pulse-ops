@@ -75,7 +75,7 @@ test('dashboard keeps operational signals while full collection and event eviden
     ]);
     const before = structuredClone(s), incidents = registeredIncidents(s);
     const recipes = dashboardRecipes(s, ['api-a', 'host']);
-    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['requests', undefined], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['errors', undefined], ['node-cpu', undefined], ['memory-host', undefined], ['disk-used', undefined]]);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.label]), [['node-cpu', 'CPU'], ['memory-host', 'RAM'], ['disk-used', '디스크'], ['p50', 'P50'], ['p99', 'P99'], ['p99.9', 'P99.9'], ['requests', undefined], ['errors', undefined]]);
     assert.deepEqual(recipes.find(r => r.metricIds[0] === 'p99').keys, ['p99:api-a']);
     assert.ok(metricsForAsset(s, s.assets[0]).some(m => m.id === 'cookie-expiry'));
     assert.ok(metricsForAsset(s, s.assets[3]).some(m => m.id === 'uptime'));
@@ -165,7 +165,8 @@ test('every metric family is a single-unit set of distinct catalog metrics', () 
             assert.ok(!seen.has(id), id);
             seen.add(id);
         }
-        assert.equal(new Set(family.members.map(([id]) => metricById.get(id).unit)).size, 1, family.id);
+        if (!family.mixedUnits)
+            assert.equal(new Set(family.members.map(([id]) => metricById.get(id).unit)).size, 1, family.id);
     }
 });
 const catalogOrder = ids => metrics.filter(m => ids.includes(m.id));
@@ -191,7 +192,7 @@ test('dashboard groups server receive and send traffic into one row per selected
     const s = snapshot(['node-cpu', 'memory-host', 'network-in', 'network-out'].map(id => metric(id, values)));
     s.assets = ['host-a', 'host-b'].map(id => asset(id, 'server'));
     const recipes = dashboardRecipes(s, ['host-a', 'host-b']);
-    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row]), [['node-cpu', undefined], ['memory-host', undefined], ['network-in', 'network:0'], ['network-out', 'network:0']]);
+    assert.deepEqual(recipes.map(r => [r.metricIds[0], r.family?.row]), [['node-cpu', 'resources:0'], ['memory-host', 'resources:0'], ['network-in', 'network:0'], ['network-out', 'network:0']]);
     assert.ok(dashboardRecipes(snapshot([metric('network-in', { host: 1 })]), ['host']).every(r => !r.family));
 });
 test('application dashboard shows P50, P95, P97, P99 and P99.9 as one latency row without the mean', () => {
@@ -200,15 +201,22 @@ test('application dashboard shows P50, P95, P97, P99 and P99.9 as one latency ro
     const row = recipes.filter(r => r.family);
     assert.deepEqual(row.map(r => r.family.label), ['P50', 'P95', 'P97', 'P99', 'P99.9']);
     assert.ok(row.every(r => r.family.row === 'latency:0' && r.title.startsWith('응답 시간 · ')));
-    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors']);
+    assert.deepEqual(recipes.map(r => r.metricIds[0]), ['p50', 'p95', 'p97', 'p99', 'p99.9', 'requests', 'errors']);
+});
+test('dashboard starts with CPU, RAM and disk, then the latency row, then the rest', () => {
+    const s = snapshot(['requests', 'p50', 'p95', 'p97', 'p99', 'p99.9', 'errors', 'cpu', 'memory', 'node-cpu', 'memory-host', 'disk-used', 'db-probe'].map(id => metric(id, { 'api-a': 1, host: 2, db: 3 })));
+    const recipes = dashboardRecipes(s, ['api-a', 'host', 'db']);
+    assert.deepEqual(recipes.slice(0, 8).map(r => r.family?.row), ['resources:0', 'resources:0', 'resources:0', 'latency:0', 'latency:0', 'latency:0', 'latency:0', 'latency:0']);
+    assert.deepEqual(recipes.slice(0, 3).map(r => [r.family.label, r.assetIds]), [['CPU', ['host']], ['RAM', ['host']], ['디스크', ['host']]]);
+    assert.deepEqual(recipes.slice(8).map(r => r.metricIds[0]), ['requests', 'errors', 'cpu', 'memory', 'db-probe']);
 });
 test('server dashboard shows CPU, process CPU, RAM and one disk usage chart', () => {
     const s = snapshot(['node-cpu', 'cpu', 'memory-host', 'disk', 'disk-total', 'disk-used', 'disk-free', 'uptime', 'swap'].map(id => metric(id, { host: 10 })));
     const recipes = dashboardRecipes(s, ['host']);
-    assert.deepEqual(recipes.map(r => [r.title, r.family?.label]), [['CPU 사용률', undefined], ['프로세스 CPU · 최댓값', undefined], ['RAM 사용률', undefined], ['디스크 사용량', undefined]]);
+    assert.deepEqual(recipes.map(r => [r.title, r.family?.row, r.family?.label]), [['CPU 사용률', 'resources:0', 'CPU'], ['RAM 사용률', 'resources:0', 'RAM'], ['디스크 사용량', 'resources:0', '디스크'], ['프로세스 CPU · 최댓값', undefined, undefined]]);
     assert.ok(['cpu', 'disk', 'disk-total', 'disk-used', 'disk-free'].every(id => metricsForAsset(snapshot(), s.assets[3]).some(m => m.id === id)));
     const detail = metricRecipes(s, ['host'], metricsForAsset(s, s.assets[3])).filter(r => r.family?.id === 'disk-capacity');
-    assert.deepEqual(detail.map(r => r.family.label), ['전체', '사용', '남음']);
+    assert.deepEqual(detail.map(r => r.family.label), ['전체', '남음']);
 });
 test('each disk usage line carries its own latest total capacity', () => {
     const total = metric('disk-total', { 'host-a': 1006.85, 'host-b': 50 });
