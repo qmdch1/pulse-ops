@@ -44,22 +44,24 @@ const familyRow=recipe=>recipe.family&&!recipe.mergeKeys&&!recipe.parentKey?reci
 class FamilyRow {
  constructor(recipe,size){
   this.charts=[];this.size=size;this.hiddenAssets=new Set();this.order=[];this.scales=new Map();this.frame=0;
-  this.node=document.createElement('section');this.node.className='chart-family';this.node.setAttribute('aria-label',`${recipe.family.title} · ${size}개 그래프 같은 축 비교`);
+  this.node=document.createElement('section');this.node.className='chart-family';this.node.setAttribute('aria-label',`${recipe.family.title} · ${size}개 그래프 ${recipe.family.mixed?'함께':'같은 축'} 비교`);
   this.node.innerHTML=`<header><div><h4>${esc(recipe.family.title)}</h4><p></p></div><div class="chart-family-legend" role="group" aria-label="${esc(recipe.family.title)} 인프라 표시 전환"></div></header><div class="chart-family-grid"></div>`;
   this.body=this.node.querySelector('.chart-family-grid');this.body.style.gridTemplateColumns=`repeat(${size},minmax(0,1fr))`;
   this.resize=new ResizeObserver(([entry])=>{this.body.style.gridTemplateColumns=`repeat(${familyColumns(entry.contentRect.width,this.size)},minmax(0,1fr))`});this.resize.observe(this.body);
  }
  color(assetId){return Math.max(0,this.order.indexOf(assetId))}
  // Only cards of the same unit share an axis, so CPU and RAM align while disk keeps its capacity axis.
- scale(unit){if(!this.scales.has(unit))this.scales.set(unit,sharedScale(this.charts.filter(c=>c.lines.length&&c.units.includes(unit)).map(c=>axisScale(c.lines,unit,c.snapshot.start,c.snapshot.end,c.hidden)),unit));return this.scales.get(unit)}
+ // A family of different quantities in one unit (DB connections, locks) gives each card its own axis.
+ axis(chart){return chart.recipe.family.axis||chart.lines[0]?.unit}
+ scale(axis){if(!this.scales.has(axis)){const charts=this.charts.filter(c=>c.lines.length&&this.axis(c)===axis),unit=charts[0]?.units[0];this.scales.set(axis,sharedScale(charts.map(c=>axisScale(c.lines,unit,c.snapshot.start,c.snapshot.end,c.hidden)),unit))}return this.scales.get(axis)}
  // Colors follow the infrastructure, not the line position, and hiding one keeps the rest unchanged.
  changed(){this.scales.clear();const seen=new Set(this.charts.flatMap(c=>c.lines.map(l=>l.assetId)));this.order=[...new Set(this.charts.flatMap(c=>c.recipe.assetIds))].filter(id=>seen.has(id));if(!this.frame)this.frame=requestAnimationFrame(()=>{this.frame=0;this.render()})}
  render(){
   const names=new Map(this.charts.flatMap(c=>c.lines.map(l=>[l.assetId,l.assetName]))),legend=this.node.querySelector('.chart-family-legend');
   legend.replaceChildren(...this.order.map(id=>{const button=document.createElement('button'),off=this.hiddenAssets.has(id);button.classList.toggle('muted',off);button.setAttribute('aria-pressed',String(!off));button.title=`${names.get(id)} · 이 행 전체에서 ${off?'다시 표시':'숨기기'}`;button.innerHTML=`<i></i><span>${esc(names.get(id))}</span>`;button.querySelector('i').style.background=palette[this.color(id)%8];button.onclick=()=>{if(this.hiddenAssets.has(id))this.hiddenAssets.delete(id);else this.hiddenAssets.add(id);this.charts.forEach(c=>c.follow());this.changed()};return button}));
-  const units=[...new Set(this.charts.filter(c=>c.lines.length).map(c=>c.lines[0].unit))],unit=units[0],scale=unit&&this.scale(unit),warnings=[...new Set(this.charts.map(c=>c.recipe.warning).filter(Number.isFinite))];
-  const axes=units.length>1?units.map(u=>{const labels=this.charts.filter(c=>c.lines[0]?.unit===u).map(c=>c.recipe.family.label);return `${labels.join(' · ')} ${labels.length>1?'같은 축 ':''}${axisRangeLabel(this.scale(u))}`}):[];
-  this.node.querySelector('header p').textContent=units.length>1?axes.join(' · '):[this.charts.map(c=>c.recipe.family.label).join(' · '),scale?`같은 축 ${axisRangeLabel(scale)}`:'관측 대기',scale&&unit!=='0/1'&&warnings.length===1?`점선 경고 ${formatAxisTick(warnings[0],scale)}${scale.displayUnit?' '+scale.displayUnit:''}`:''].filter(Boolean).join(' · ');
+  const shown=this.charts.filter(c=>c.lines.length),keys=[...new Set(shown.map(c=>this.axis(c)))],unit=shown[0]?.units[0],scale=keys.length?this.scale(keys[0]):null,warnings=[...new Set(this.charts.map(c=>c.recipe.warning).filter(Number.isFinite))];
+  const axes=keys.length>1?keys.map(k=>{const labels=shown.filter(c=>this.axis(c)===k).map(c=>c.recipe.family.label);return `${labels.join(' · ')} ${labels.length>1?'같은 축 ':''}${axisRangeLabel(this.scale(k))}`}):[];
+  this.node.querySelector('header p').textContent=keys.length>1?axes.join(' · '):[this.charts.map(c=>c.recipe.family.label).join(' · '),scale?`같은 축 ${axisRangeLabel(scale)}`:'관측 대기',scale&&unit!=='0/1'&&warnings.length===1?`점선 경고 ${formatAxisTick(warnings[0],scale)}${scale.displayUnit?' '+scale.displayUnit:''}`:''].filter(Boolean).join(' · ');
   for(const chart of this.charts){chart.showLatest();if(chart.visible)chart.draw()}
  }
  destroy(){cancelAnimationFrame(this.frame);this.resize.disconnect()}
@@ -161,7 +163,7 @@ class CanvasChart {
  draw(){
   this.dimensions();const ctx=this.canvas.getContext('2d');ctx.clearRect(0,0,this.width,this.height);if(!this.lines.length)return;
   const steps=this.compact?2:4;ctx.font=this.compact?'10px system-ui':'11px system-ui';ctx.fillStyle='#a2acc0';ctx.lineWidth=1;this.scales={};
-  for(const unit of this.units)this.scales[unit]=this.row?.scale(unit)||axisScale(this.lines,unit,this.snapshot.start,this.snapshot.end,this.hidden);
+  for(const unit of this.units)this.scales[unit]=this.row?.scale(this.row.axis(this))||axisScale(this.lines,unit,this.snapshot.start,this.snapshot.end,this.hidden);
   // Size each axis gutter to its widest tick so values like 1,006.85 are never clipped.
   const widest=unit=>{const scale=this.scales[unit];return Math.max(...Array.from({length:steps+1},(_,i)=>ctx.measureText(formatAxisTick(scale.low+(scale.high-scale.low)*i/steps,scale)).width))};
   this.left=Math.max(this.left,Math.ceil(widest(this.units[0]))+9);this.plotWidth=this.width-this.left-(this.units.length>1?Math.max(50,Math.ceil(widest(this.units[1]))+10):this.compact?12:15);

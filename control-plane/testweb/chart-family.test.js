@@ -58,3 +58,21 @@ test('a resource card merged out of the top row leaves full-size charts and undo
   assert.deepEqual([...row().querySelectorAll('.chart-title')].map(b=>b.textContent),['CPU','RAM','디스크']);
  }finally{grid.destroy();root.remove()}
 });
+
+test('a database row shares one legend while connections and locks keep their own axes',async()=>{
+ const db=(id,name)=>({id,name,kind:'postgres',dependencies:[],enabled:true,status:'connected'});
+ const values={'db-probe':[4,6],'db-transactions':[12,30],'db-connections':[40,140],'db-locks':[2,3],'db-buffer':[99,98]};
+ const s={assets:[db('pg-a','PG A'),db('pg-b','PG B')],mode:'test',connected:true,collectedAt:'',start:9700,end:10000,step:15,targets:[],alerts:[],metrics:Object.entries(values).map(([id,v])=>({id,state:'ok',latest:null,series:['pg-a','pg-b'].map((assetId,i)=>({labels:{assetId,name:i?'PG B':'PG A'},points:Array.from({length:21},(_,t)=>({time:9700+t*15,value:v[i]}))}))}))};
+ const root=document.createElement('div');root.className='board-chart-grid';root.style.width='1100px';document.body.append(root);
+ const grid=new ChartGrid(root,dashboardRecipes(s,['pg-a','pg-b']),s,()=>{});
+ try{await frames();
+  const row=root.querySelector(':scope>.chart-family');assert.ok(row,'database row');assert.equal(root.querySelectorAll(':scope>.board-chart').length,0);
+  assert.equal(row.querySelector('h4').textContent,'데이터베이스');assert.equal(row.getAttribute('aria-label'),'데이터베이스 · 4개 그래프 함께 비교');
+  assert.deepEqual([...row.querySelectorAll('.chart-title')].map(b=>b.textContent),['응답','트랜잭션','연결','잠금']);
+  assert.deepEqual([...row.querySelectorAll('.chart-family-legend button')].map(b=>b.textContent),['PG A','PG B']);
+  assert.equal(row.querySelector('header p').textContent,'응답 0–500 ms · 트랜잭션 0–1,000 회/s · 연결 0–140 개 · 잠금 0–10 개');
+  const charts=grid.charts.filter(c=>c.row),scale=id=>charts[0].row.scale(id).high;
+  assert.deepEqual(['db-connections','db-locks'].map(scale),[140,10]);
+  assert.deepEqual(charts.map(c=>c.node.querySelector('.chart-unit').textContent),['ms','회/s','개','개']);
+ }finally{grid.destroy();root.remove()}
+});
