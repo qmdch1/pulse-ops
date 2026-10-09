@@ -16,6 +16,8 @@ type eventCheck struct {
 type eventRule struct {
 	ID              string       `json:"id"`
 	Title           string       `json:"title"`
+	Condition       string       `json:"condition"`
+	Duration        string       `json:"duration"`
 	Severity        string       `json:"severity"`
 	RequiredIDs     []string     `json:"requiredIds"`
 	Checks          []eventCheck `json:"checks"`
@@ -147,15 +149,11 @@ func notificationEvents(asset Asset, observations []Observation, end int64) (map
 			}
 		}
 		key := rule.ID + ":" + asset.ID
-		current[key] = NotificationEvent{ID: key, RuleID: rule.ID, AssetID: asset.ID, AssetName: asset.Name, Environment: asset.Environment, Title: rule.Title, Severity: rule.Severity, Status: "firing", At: time.Unix(end, 0).UTC().Format(time.RFC3339), Values: values}
+		current[key] = NotificationEvent{ID: key, RuleID: rule.ID, AssetID: asset.ID, AssetName: asset.Name, Environment: asset.Environment, Title: rule.Title, Severity: rule.Severity, Status: "firing", At: time.Unix(end, 0).UTC().Format(time.RFC3339), Values: values, Tags: asset.Tags, Condition: rule.Condition + " · " + rule.Duration}
 	}
 	return current, recoverable
 }
 func (s *Service) enqueueAssetNotifications(id string) error {
-	items, err := s.store.Integrations()
-	if err != nil || len(items) == 0 {
-		return err
-	}
 	asset, err := s.store.Get(id)
 	if err != nil {
 		return err

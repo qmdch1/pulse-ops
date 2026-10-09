@@ -91,6 +91,7 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 func (s *Service) apiHandler() http.Handler {
 	api := http.NewServeMux()
 	s.installIntegrationAPI(api)
+	s.installOperationsAPI(api)
 	api.HandleFunc("GET /assets", func(w http.ResponseWriter, r *http.Request) {
 		assets, e := s.store.List()
 		if e != nil {
@@ -290,6 +291,9 @@ func (s *Service) apiHandler() http.Handler {
 	return api
 }
 func (s *Store) Enable(id string, enabled bool) (Asset, error) {
+	return s.enableVersion(id, enabled, 0)
+}
+func (s *Store) enableVersion(id string, enabled bool, version int) (Asset, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	all, e := s.allLocked()
@@ -299,6 +303,9 @@ func (s *Store) Enable(id string, enabled bool) (Asset, error) {
 	record, ok := all[id]
 	if !ok {
 		return Asset{}, errors.New("등록된 인프라가 없습니다")
+	}
+	if version > 0 && record.Asset.Version != version {
+		return Asset{}, errors.New("다른 변경이 저장되었습니다")
 	}
 	record.Asset.Enabled = enabled
 	record.Asset.Version++

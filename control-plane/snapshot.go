@@ -11,7 +11,9 @@ import (
 
 var buildTime time.Time // ETags carry deployment identity; no invented build timestamp.
 type metricDefinition struct {
-	ID string `json:"id"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Unit  string `json:"unit"`
 }
 
 var metricDefinitions = []metricDefinition{}
