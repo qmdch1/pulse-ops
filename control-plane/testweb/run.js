@@ -11,6 +11,7 @@ import './dashboard-controls.test.js';
 import './chart-family.test.js';
 import './integrations.test.js';
 import './operations.test.js';
+import './ai.test.js';
 import {esc} from '/assets/ui.js';
 import {scopeSnapshot} from '/assets/lib/assets.js';
 import {ruleState} from '/assets/lib/rule-catalog.js';

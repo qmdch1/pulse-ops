@@ -201,7 +201,7 @@ def build(theme):
     # canvas + heading
     s.rect(s.base, 0.5, 0.5, W - 1, H - 1, 16, 'bg', 'edge')
     s.text(s.base, 40, 46, 'PULSE / OPS · 트래픽 흐름', 11.5, 'violet_ink', 700, extra='letter-spacing="0.6"')
-    s.text(s.base, 40, 77, 'Go 서비스 하나가 화면, 수집, 터미널 요청을 함께 처리합니다', 21, 'text', 700)
+    s.text(s.base, 40, 77, 'Go 서비스 하나가 화면, 수집, 터미널과 AI 배정을 처리합니다', 21, 'text', 700)
 
     # phase pills with progress bars
     px = 690
@@ -445,6 +445,7 @@ def build(theme):
 
     # caption bar ---------------------------------------------------------------
     s.rect(s.base, 40, 664, 1120, 50, 12, 'panel', 'border')
+    s.text(s.base, 40, 732, 'AI 별도 경로: /api/control/ai/* → Jev 판단 → Codex·Claude CLI · 독립 작업 공간 · 동시 1~4개', 10.5, 'muted')
     s.text(s.base, 1144, 694, '논리 경로 · 실제 속도 아님', 10.5, 'faint', 500, 'end')
     s.base.append(f'<text class="t rm" x="60" y="694" font-size="13" fill="{c["body"]}">① 화면 로드 → ② 화면 갱신(3초 캐시) → ③ 15초 직접 수집 → ④ 단회 티켓 터미널</text>')
     for start, end, color, label, caption in PHASES:
@@ -456,7 +457,8 @@ def build(theme):
     title = 'Pulse Ops 트래픽 흐름'
     desc = ('브라우저는 Go 서비스에서 정적 파일과 /api/monitoring 스냅샷을 받고, Go 스케줄러는 15초마다 최대 4개 슬롯으로 등록한 '
             '서버·DB·Redis·HTTP·애플리케이션을 직접 수집해 SQLite에 저장합니다. /api/control/integrations에서 설정한 웹훅·Slack·Discord·Teams에는 '
-            '서버에서 판정한 발생·복구 이벤트와 정기 요약을 수신 조건·점검 시간·묶음 설정을 적용한 암호화 대기열로 전송합니다. /api/control/events·mutes·deliveries·views에서 사건 처리, 점검, 전송 이력과 저장된 대시보드를 관리하며, 터미널은 단회 티켓과 WebSocket을 거쳐 SSH PTY로 연결됩니다.')
+            '서버에서 판정한 발생·복구 이벤트와 정기 요약을 수신 조건·점검 시간·묶음 설정을 적용한 암호화 대기열로 전송합니다. /api/control/events·mutes·deliveries·views에서 사건 처리, 점검, 전송 이력과 저장된 대시보드를 관리하며, 터미널은 단회 티켓과 WebSocket을 거쳐 SSH PTY로 연결됩니다. '
+            'AI 작업은 이 네 장면과 별도입니다. /api/control/ai/*에 등록한 프롬프트를 Jev가 분류·배정하고, 설정한 동시 1~4개 작업을 독립 Git 작업 공간에서 Codex·Claude CLI로 실행합니다. 판단 확신도가 낮으면 실행 전에 담당 확인을 기다립니다.')
     style = ('.t{font-family:Pretendard,"Pretendard Variable","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR","Noto Sans CJK KR",'
              '"Segoe UI",system-ui,sans-serif}.m{font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",Menlo,monospace}'
              'text{text-rendering:geometricPrecision}.rm{display:none}'

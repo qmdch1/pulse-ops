@@ -24,6 +24,7 @@ type previousSample struct {
 	Values map[string]float64
 }
 type Service struct {
+	ai        *AIManager
 	snapshots snapshotCache
 	store     *Store
 	origins   map[string]bool
@@ -42,6 +43,7 @@ type Service struct {
 
 func newService(store *Store, origins []string) *Service {
 	s := &Service{store: store, origins: map[string]bool{}, tickets: map[string]terminalTicket{}, busy: map[string]bool{}, previous: map[string]previousSample{}, processes: map[string]processSample{}, hosts: map[string]*dockerHost{}, history: map[string][]previousSample{}, retry: map[string]time.Time{}, failures: map[string]int{}, slots: make(chan struct{}, 4)}
+	s.ai = newAIManager(store)
 	for _, origin := range origins {
 		if u, e := url.Parse(strings.TrimSpace(origin)); e == nil && u.Host != "" {
 			s.origins[u.Scheme+"://"+u.Host] = true
@@ -93,6 +95,7 @@ func (s *Service) apiHandler() http.Handler {
 	api := http.NewServeMux()
 	s.installIntegrationAPI(api)
 	s.installOperationsAPI(api)
+	s.installAIAPI(api)
 	api.HandleFunc("GET /assets", func(w http.ResponseWriter, r *http.Request) {
 		assets, e := s.store.List()
 		if e != nil {
@@ -409,6 +412,16 @@ func main() {
 	}
 	go service.run(ctx)
 	go service.runNotifications(ctx)
+	aiDone := make(chan struct{})
+	go func() { defer close(aiDone); service.ai.run(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-aiDone:
+		case <-time.After(10 * time.Second):
+			log.Printf("AI workers did not stop within the shutdown deadline")
+		}
+	}()
 	server := &http.Server{Addr: address, Handler: service.webHandler(mode, os.Getenv("DASHBOARD_USERNAME"), os.Getenv("DASHBOARD_PASSWORD"), os.Getenv("SSH_INVENTORY_FILE")), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16384}
 	go func() {
 		<-ctx.Done()
