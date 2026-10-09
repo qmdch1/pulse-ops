@@ -1,6 +1,6 @@
 import {test} from './harness.js';
 import {assert} from './harness.js';
-import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, eventMetricIds, groupEvents, metricsForAsset, observedForAsset, relatedAssets } from '/assets/lib/board.js';
+import { boardSelection, chartGroups, chartRows, comparisonLines, comparisonSnapshot, dashboardRecipes, eventMetricIds, groupEvents, metricsForAsset, observedForAsset, relatedAssets } from '/assets/lib/board.js';
 import { registeredIncidents } from '/assets/lib/assets.js';
 const asset = (id, kind = 'application', dependencies = []) => ({ id, name: id, kind, address: '', port: 0, username: '', database: '', tlsMode: '', os: '', metricsUrl: '', environment: 'test', ssh: { host: '', port: 0, username: '', jumpId: '', fingerprint: '' }, dependencies, enabled: true, version: 1, status: 'connected', lastSeen: '', message: '', hasPassword: false, hasSshPassword: false, hasPrivateKey: false, hasPassphrase: false });
 const metric = (id, values) => ({ id, state: 'ok', latest: null, series: Object.entries(values).map(([assetId, value]) => ({ labels: { assetId, name: assetId }, points: Array.from({ length: 21 }, (_, i) => ({ time: 9700 + i * 15, value })) })) });
@@ -36,6 +36,33 @@ test('comparison retains independent P99 values and excludes unselected assets',
     assert.equal(multi.metrics[0].series.length, 2);
     assert.equal(comparisonSnapshot(s, ['api-a']).metrics[0].latest, 700);
     assert.equal(comparisonSnapshot(s, []).metrics[0].state, 'missing');
+});
+test('dashboard automatically shares matching server metrics and retains each selected server value', () => {
+    const s = snapshot([metric('node-cpu', { 'host-a': 12, 'host-b': 37, 'host-c': 99 }), metric('memory-host', { 'host-a': 40, 'host-b': 65 })]);
+    s.assets = ['host-a', 'host-b', 'host-c'].map(id => asset(id, 'server'));
+    const recipes = dashboardRecipes(s, ['host-a', 'host-b']);
+    assert.equal(recipes.length, 2);
+    for (const id of ['node-cpu', 'memory-host']) {
+        const matches = recipes.filter(recipe => recipe.metricIds.includes(id));
+        assert.equal(matches.length, 1);
+        assert.deepEqual(matches[0].keys, [`${id}:host-a`, `${id}:host-b`]);
+        assert.deepEqual(matches[0].assetIds, ['host-a', 'host-b']);
+    }
+    const cpu = recipes.find(recipe => recipe.metricIds[0] === 'node-cpu');
+    assert.deepEqual(comparisonLines(s, cpu.assetIds, cpu.metricIds).map(line => line.points.at(-1).value), [12, 37]);
+    const single = dashboardRecipes(s, ['host-b']);
+    assert.deepEqual(single.find(recipe => recipe.metricIds[0] === 'node-cpu').keys, ['node-cpu:host-b']);
+    assert.deepEqual(dashboardRecipes(s, []), []);
+});
+test('dashboard missing metrics stay scoped to the selected infrastructure without inventing values', () => {
+    const s = snapshot([metric('node-cpu', { host: 0 }), metric('memory-host', { host: null }), metric('db-probe', { db: 5 })]);
+    const observed = dashboardRecipes(s, ['host', 'deleted']);
+    assert.deepEqual(observed.map(recipe => recipe.metricIds[0]), ['node-cpu']);
+    const missing = dashboardRecipes(s, ['host'], true);
+    const memory = missing.find(recipe => recipe.metricIds[0] === 'memory-host');
+    assert.ok(memory);
+    assert.equal(comparisonLines(s, memory.assetIds, memory.metricIds).length, 0);
+    assert.ok(!missing.some(recipe => recipe.metricIds.includes('db-probe')));
 });
 test('display comparison does not change asset-local incident evaluation', () => {
     const s = snapshot([metric('p99', { 'api-a': 700 }), metric('cpu', { 'api-b': 10 })]);

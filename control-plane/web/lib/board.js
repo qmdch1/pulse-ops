@@ -43,6 +43,25 @@ export function metricsForAsset(snapshot, asset) {
 export function observedForAsset(snapshot, metricId, assetId) {
     return !!snapshot.metrics.find(m => m.id === metricId)?.series.some(s => s.labels.assetId === assetId && s.points.some(p => p.value !== null));
 }
+export function metricRecipes(snapshot, ids, definitions) {
+    return definitions.flatMap(metric => {
+        const parts = chartGroups(comparisonLines(snapshot, ids, [metric.id]));
+        return (parts.length ? parts : [[]]).map((lines, index) => ({
+            title: metric.title + (index ? ' · ' + (index + 1) : ''),
+            subtitle: metric.description, assetIds: ids, metricIds: [metric.id],
+            keys: lines.length ? lines.map(line => line.key) : undefined,
+            metric, unit: metric.unit, warning: metric.warning,
+        }));
+    });
+}
+// A dashboard chart belongs to a metric; each selected asset keeps its own line.
+export function dashboardRecipes(snapshot, ids, showMissing = false) {
+    const selected = snapshot.assets.filter(asset => ids.includes(asset.id));
+    const relevant = new Set(selected.flatMap(asset => metricsForAsset(snapshot, asset).map(metric => metric.id)));
+    const definitions = metrics.filter(metric => relevant.has(metric.id) &&
+        (showMissing || selected.some(asset => observedForAsset(snapshot, metric.id, asset.id))));
+    return metricRecipes(snapshot, selected.map(asset => asset.id), definitions);
+}
 export function relatedAssets(snapshot, rootIds) {
     const byId = new Map(snapshot.assets?.map(a => [a.id, a]) || []), seen = new Set(), pending = [...rootIds];
     while (pending.length) {
