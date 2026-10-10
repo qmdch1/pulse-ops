@@ -36,6 +36,32 @@ Jev 분석에는 입력 프롬프트·프로젝트 설명·평가 요약이 Type
 
 HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사용합니다. 애플리케이션 자체에 별도 Nginx·Node 컨테이너는 필요하지 않습니다. Prometheus/Grafana는 선택적 분석 도구이며 인프라 등록이나 기본 동작의 필수 요소가 아닙니다.
 
+## Cloudflare DNS·프록시 구성 예시
+
+공인 IP가 있는 서버에서 Cloudflare DNS·프록시와 Nginx를 사용하는 **배치 예시**입니다. `app.example.com`은 프런트와 `/api`, `ops.example.com`은 Pulse Ops 관리 화면으로 연결합니다. DB·Redis·각 백엔드의 `/metrics`는 내부망에서 직접 수집합니다.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cloudflare-traffic-flow-dark.svg">
+  <img alt="Cloudflare 구성 예시 애니메이션: DNS 조회, CDN 캐시 HIT, Nginx·백엔드·Redis·DB 요청과 500 반환, Pulse Ops의 내부 지표 수집, 관리 화면 조회를 순서대로 보여 줍니다. Cloudflare API 연결은 연동 예정이며 모든 수치는 가상의 5분 표본입니다." src="docs/images/cloudflare-traffic-flow.svg" width="100%">
+</picture>
+
+44초 반복 영상은 **DNS 조회 → 캐시 HIT → API·DB 처리 → 500 오류 응답 → 내부 지표 수집 → 통합 화면 예시** 순서입니다. 실제로는 사용자 요청·수집·화면 조회가 독립적으로 동작합니다. 이동 속도와 지표는 설명용 가상값이며, ‘동작 줄이기’ 설정에서는 같은 구조와 예시값을 정지 화면으로 표시합니다.
+
+| 가상의 5분 표본 | 예시값 | 관계 |
+| --- | --- | --- |
+| Cloudflare 서비스(app) 외부 요청 | 10,000건 | CDN HIT 6,000건 + 원본 전달 4,000건 |
+| App A | 요청 2,500건 · 5xx 10건 · P99 240ms | 오류율 0.40% |
+| App B | 요청 1,500건 · 5xx 5건 · P99 180ms | 오류율 약 0.33% |
+| 내부 인프라 | 서버 CPU 38% · RAM 62% · DB 연결 24개 · Redis HIT 96% | 각 대상에서 별도로 얻는 관측값 |
+
+트래픽 표본은 서비스 도메인(app)만 집계하며 관리 도메인(ops)은 별도입니다. 외부 요청 10,000건과 원본 요청 4,000건을 더하지 않습니다. 원본 요청 4,000건은 A 2,500건 + B 1,500건이며, CDN에서 끝난 6,000건은 백엔드에 도착하지 않습니다. 앱 요청의 Redis MISS는 경로 설명을 위한 한 건이고, Redis HIT 96%는 별도 명령 집계 예시입니다. P99는 인스턴스별 Histogram에서 얻는 예시값이며 서로 평균 내지 않습니다.
+
+**현재 지원:** 인스턴스별 애플리케이션 `/metrics`, DB·Redis 직접 조회, 서버 SSH 수집과 SQLite 저장. 앱의 요청량·오류율·P99는 연속 5분 표본이 쌓여야 표시합니다. 그림의 수집기는 최대 4개를 동시에 조회하고 첫 슬롯이 비면 다섯 번째 대상인 서버 SSH를 조회합니다.
+
+**추가 구현 범위:** 그림의 주황 점선 **Cloudflare Analytics API** 연결과 외부 트래픽 카드는 연동 예정인 설계입니다. Cloudflare·Nginx 원문 로그를 수집·검색하는 기능도 현재 지원 범위에 포함되지 않습니다. Cloudflare API의 조회 항목·기간은 [요금제와 데이터셋](https://developers.cloudflare.com/analytics/graphql-api/limits/)에 따라 달라집니다.
+
+Cloudflare DNS의 [프록시를 켜야](https://developers.cloudflare.com/dns/proxy-status/) 웹 요청이 Cloudflare를 통과합니다. DNS only는 주소 조회만 제공합니다. 이 예시에서는 원본 인증서와 [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/)를 사용하고, API·관리 화면은 캐시를 우회합니다. 관리용 Nginx는 외부 Host·Origin과 WebSocket Upgrade를 전달하며, Pulse Ops 운영 계정으로 로그인합니다.
+
 ## 애플리케이션의 /metrics 구축
 
 **각 애플리케이션 인스턴스가 자신의 요청 집계값을 제공해야 합니다. API 목록을 Pulse Ops에 하나씩 등록할 필요는 없습니다.** 같은 앱을 여러 서버에서 실행하면 공통 미들웨어 코드를 한 번 추가해 배포하고, 각 서버의 `/metrics` 주소를 따로 등록합니다.
@@ -346,4 +372,4 @@ python scripts/verify-live.py
 
 테스트 Compose의 [브라우저 회귀 검사](http://localhost:13000/__tests__/)는 일반 브라우저에서 순수 JS 지표·규칙·차트 상태 검사를 실행합니다. 운영에는 이 경로가 없습니다. Go 통합 검사는 격리 Compose 내부에서만 실행합니다. `PULSE_TEST_CONTROL=http://127.0.0.1:7080`, `PULSE_TEST_DATABASES=true`, `PULSE_TEST_SSH_JUMP=true`로 실제 DB/SSH/PTY·키·jump·티켓·리사이즈와 PostgreSQL·Redis의 jump 경유 수집을 검증합니다. [최신 검증 기록](docs/native-web-verification.md)을 확인하세요.
 
-전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`로 다시 생성합니다. 두 스크립트는 표준 라이브러리만 사용하며 각각 라이트·다크 SVG를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
+전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`, Cloudflare 구성 예시는 `python3 scripts/render-cloudflare-flow.py`로 다시 생성합니다. 세 스크립트는 표준 라이브러리만 사용하며 각각 라이트·다크 SVG를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
