@@ -13,33 +13,32 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = runpy.run_path(str(ROOT / 'scripts' / 'render-architecture.py'))
 Svg, THEMES, anim, shown, legs = (BASE[k] for k in ('Svg', 'THEMES', 'anim', 'shown', 'legs'))
 EASE_IN, EASE_OUT, LINEAR = (BASE[k] for k in ('EASE_IN', 'EASE_OUT', 'LINEAR'))
-W, H, T = 1440, 1180, 44.0
+W, H, T = 1440, 1180, 40.0
 anim.__globals__['T'] = T
 
 # Traffic trips use consecutive legs, including the reverse response.
-DNS_OUT, DNS_BACK = legs(.5, .9, .9)
-HIT_IN, HIT_LOOKUP, HIT_FOUND, HIT_BACK = legs(4.5, .9, .7, .7, .9)
+DNS_OUT, DNS_BACK = legs(.4, .65, .65)
+HIT_IN, HIT_LOOKUP, HIT_FOUND, HIT_BACK = legs(DNS_BACK[1] + .25, .7, .55, .55, .7)
 API_IN, API_EDGE, API_APP, CACHE_GET, CACHE_MISS, SQL_GET, SQL_ROWS, API_REPLY, EDGE_REPLY, USER_REPLY = legs(
-    9.6, .7, .7, .7, .8, .7, .7, .7, .8, .7, .7)
-ERR_IN, ERR_EDGE, ERR_APP, ERR_REPLY, ERR_RETURN, ERR_USER = legs(18.5, .8, .8, .8, .8, .8, .8)
+    5.6, .7, .7, .7, .8, .7, .7, .7, .8, .7, .7)
+ERR_IN, ERR_EDGE, ERR_APP, ERR_REPLY, ERR_RETURN, ERR_USER = legs(14.5, .8, .8, .8, .8, .8, .8)
 JOBS = [
-    ('a-metrics', 24.7, 1.15, 1.1, 0),
-    ('b-metrics', 24.9, 1.35, 1.25, 1),
-    ('db-stats', 25.1, 1.5, 1.25, 2),
-    ('redis-stats', 25.3, 1.65, 1.4, 3),
+    ('a-metrics', 20.7, 1.15, 1.1, 0),
+    ('b-metrics', 20.9, 1.35, 1.25, 1),
+    ('db-stats', 21.1, 1.5, 1.25, 2),
+    ('redis-stats', 21.3, 1.65, 1.4, 3),
 ]
 HOST_START = JOBS[0][1] + JOBS[0][2] + JOBS[0][3]
 HOST_GET, HOST_BACK = legs(HOST_START, .85, .85)
-STORE, CHART = legs(29.3, .8, .9)
-CF_GET, CF_DATA = legs(35.0, 1.4, 1.4)
-OPS_IN, OPS_EDGE, OPS_GET, OPS_BACK, OPS_RETURN, OPS_USER = legs(38.4, .55, .55, .7, .7, .55, .55)
+STORE, CHART = legs(25.3, .8, .9)
+CF_GET, CF_DATA = legs(31.0, 1.4, 1.4)
+OPS_IN, OPS_EDGE, OPS_GET, OPS_BACK, OPS_RETURN, OPS_USER = legs(34.4, .55, .55, .7, .7, .55, .55)
 PHASES = [
-    (0, 4, 'violet', '① DNS 조회', 'DNS가 Cloudflare의 주소를 알려 주고, 이후 웹 요청은 프록시를 통과합니다.'),
-    (4, 9, 'amber', '② CDN 캐시 HIT', '정적 파일은 엣지 캐시에서 응답합니다. 이 요청은 원본 서버에 도착하지 않습니다.'),
-    (9, 18, 'blue', '③ API · DB 처리', 'API는 Nginx → App A로 전달됩니다. Redis MISS 뒤 DB를 조회하고 200으로 응답합니다.'),
-    (18, 24, 'red', '④ 500 오류 응답', 'App B가 반환한 500이 같은 경로로 전달됩니다. 최종 응답 코드와 시간은 앱에서 집계합니다.'),
-    (24, 34, 'green', '⑤ 내부 지표 수집', 'Pulse Ops는 15초마다 직접 수집합니다. 슬롯 4개 중 하나가 비면 서버 SSH를 수집합니다.'),
-    (34, T, 'amber', '⑥ 통합 화면 예시', 'Cloudflare API 연동은 추가 구현 대상입니다. 외부 트래픽과 내부 지표를 구분해 표시하는 설계입니다.'),
+    (0, 5, 'amber', '① 접속 · 캐시 응답', 'DNS로 주소를 찾은 뒤 Cloudflare가 정적 파일을 캐시에서 응답합니다. 원본 서버에는 전달하지 않습니다.'),
+    (5, 14, 'blue', '② API · DB 처리', 'API는 Nginx → App A로 전달됩니다. Redis MISS 뒤 DB를 조회하고 200으로 응답합니다.'),
+    (14, 20, 'red', '③ 500 오류 응답', 'App B가 반환한 500이 같은 경로로 전달됩니다. 최종 응답 코드와 시간은 앱에서 집계합니다.'),
+    (20, 30, 'green', '④ 내부 지표 수집', 'Pulse Ops는 15초마다 직접 수집합니다. 슬롯 4개 중 하나가 비면 서버 SSH를 수집합니다.'),
+    (30, T, 'amber', '⑤ 통합 화면 예시', 'Cloudflare API 연동은 추가 구현 대상입니다. 외부 트래픽과 내부 지표를 구분해 표시하는 설계입니다.'),
 ]
 
 BROWSER = (56, 352, 178, 198)
@@ -118,9 +117,11 @@ def build(theme):
     text(s, 36, 108, '공인 IP 서버 구성 예시 · app.example.com / ops.example.com · 모든 수치는 가상 5분 표본', 15, 'muted')
     pill(s, 1255, 30, '구성 · 데이터 예시', 'amber', 149)
 
-    # Six scene tabs remain readable when animation is reduced or unsupported.
+    # Scene tabs share the available width, including the combined access scene.
+    tab_gap = 12
+    tab_width = (W - 72 - tab_gap * (len(PHASES) - 1)) / len(PHASES)
     for i, (start, end, color, label, _) in enumerate(PHASES):
-        x, width = 36 + i * 230, 218
+        x, width = 36 + i * (tab_width + tab_gap), tab_width
         s.rect(s.base, x, 136, width, 40, 10, 'panel', 'border')
         text(s, x + 16, 161, label, 14, 'muted', 600)
         win = (max(.2, start + .15), end - .2)
@@ -272,8 +273,8 @@ def build(theme):
     # DNS resolution completes before the HTTP sequence starts.
     trip(s, 'dns', DNS_OUT, 'violet', ease=EASE_IN)
     trip(s, 'dns', DNS_BACK, 'violet', reverse=True, ease=EASE_OUT)
-    s.glow_block(DNS, 'violet', [(.4,3.3)])
-    tag(s, 69, 343, '응답: Cloudflare 주소', 'violet', [(DNS_BACK[1],3.6)], 11.5)
+    s.glow_block(DNS, 'violet', [(DNS_OUT[0],DNS_BACK[1]+.25)])
+    tag(s, 69, 343, '응답: Cloudflare 주소', 'violet', [(DNS_BACK[1],DNS_BACK[1]+.4)], 11.5)
 
     # A cache hit is answered without an origin leg.
     for path, interval, reverse, chip, ease in (
@@ -283,7 +284,7 @@ def build(theme):
         trip(s,path,interval,'amber',reverse,chip,ease)
     s.glow_block(EDGE,'amber',[(HIT_IN[1]-.1,HIT_BACK[0]+.2)])
     s.glow_block(CACHE,'amber',[(HIT_LOOKUP[0],HIT_FOUND[1]+.3)])
-    tag(s,304,573,'/assets/app.js · 원본 요청 없음','amber',[(4.5,8.4)],12)
+    tag(s,304,573,'/assets/app.js · 원본 요청 없음','amber',[(HIT_IN[0],4.7)],12)
 
     # An API request uses Redis, misses, then reads the database.
     for path, interval, reverse, chip in (
@@ -296,7 +297,7 @@ def build(theme):
     for geometry, window in ((NGINX,(API_EDGE[0],EDGE_REPLY[1])),(APP_A,(API_APP[0],API_REPLY[1])),
                              (REDIS,(CACHE_GET[0],CACHE_MISS[1])),(DB,(SQL_GET[0],SQL_ROWS[1]))):
         s.glow_block(geometry,'blue',[window])
-    tag(s,588,692,'GET /api/orders → 200 · 180 ms 예시','blue',[(9.6,17.6)])
+    tag(s,588,692,'GET /api/orders → 200 · 180 ms 예시','blue',[(API_IN[0],13.6)])
 
     # The backend-generated error returns along the complete public path.
     for path, interval, reverse, chip in (
@@ -305,8 +306,8 @@ def build(theme):
     ):
         trip(s,path,interval,'red' if reverse else 'blue',reverse,chip)
     s.glow_block(APP_B,'red',[(ERR_APP[1]-.1,ERR_USER[1]+.3)])
-    tag(s,848,664,'App B: 최종 500 · 요청 수 / 5xx / 시간 집계','red',[(20.8,23.6)],12.5)
-    tag(s,588,692,'500은 앱에서 발생 · Nginx·Cloudflare가 전달','red',[(18.5,23.7)])
+    tag(s,848,664,'App B: 최종 500 · 요청 수 / 5xx / 시간 집계','red',[(16.8,19.6)],12.5)
+    tag(s,588,692,'500은 앱에서 발생 · Nginx·Cloudflare가 전달','red',[(ERR_IN[0],19.7)])
 
     # Four independent jobs; the fifth starts as the first frees a slot.
     for path, start, outgoing, incoming, slot in JOBS:
@@ -321,11 +322,11 @@ def build(theme):
     s.fx.append(f'<rect x="79" y="884" width="37" height="22" rx="5" fill="{c["green"]}" '
                 f'fill-opacity=".25" stroke="{c["green"]}" opacity="0">{shown((HOST_GET[0],HOST_BACK[1]))}</rect>')
     s.glow_block(HOST,'green',[(HOST_GET[0],HOST_BACK[1]+.3)])
-    s.glow_block(ENGINE,'green',[(24.6,31.3)])
+    s.glow_block(ENGINE,'green',[(20.6,27.3)])
     trip(s,'store',STORE,'green',chip='save')
     trip(s,'chart',CHART,'blue',chip='draw')
     s.glow_block(SQLITE,'green',[(STORE[0],CHART[1]+.5)])
-    tag(s,588,692,'수집기 → 인스턴스별 /metrics · DB · Redis','green',[(24.5,33.4)])
+    tag(s,588,692,'수집기 → 인스턴스별 /metrics · DB · Redis','green',[(20.5,29.4)])
 
     # This lane is visibly labelled planned in both moving and static modes.
     trip(s,'cf-api',CF_GET,'amber',chip='API')
@@ -337,12 +338,12 @@ def build(theme):
         ('ops',OPS_BACK,True),('origin',OPS_RETURN,True),('edge',OPS_USER,True),
     ):
         trip(s,path,interval,'violet',reverse,'200' if reverse else None)
-    tag(s,588,692,'ops.example.com → 관리 화면 · 캐시 우회','violet',[(38.4,43.5)])
+    tag(s,588,692,'ops.example.com → 관리 화면 · 캐시 우회','violet',[(OPS_IN[0],T-.5)])
 
     # Captions have a static accessible fallback, plus one animated scene at a time.
     s.rect(s.base,36,1090,1368,55,12,'panel','border')
     s.base.append(f'<text class="t rm" x="56" y="1123" font-size="14" fill="{c["body"]}">'
-                  'DNS 조회 → CDN HIT → API·DB → 오류 응답 → 직접 수집 → 통합 화면 예시</text>')
+                  '접속·캐시 응답 → API·DB → 오류 응답 → 직접 수집 → 통합 화면 예시</text>')
     for start,end,color,_,caption in PHASES:
         window = (max(.3,start+.2),end-.3)
         s.fx.append(f'<g opacity="0">{shown(window,fade=.2)}'
@@ -355,7 +356,7 @@ def build(theme):
              'text{text-rendering:geometricPrecision}.rm{display:none}'
              '@media(prefers-reduced-motion:reduce){.fx{display:none}.rm{display:inline}}')
     title = 'Cloudflare DNS·프록시와 Pulse Ops의 트래픽·수집 구성 예시'
-    desc = ('44초 반복 애니메이션. DNS 조회 후 Cloudflare가 정적 파일 캐시 HIT를 직접 응답합니다. API 요청은 '
+    desc = (f'{T:g}초 반복 애니메이션. 접속·캐시 응답을 하나의 장면으로 보여 주며 DNS 조회 후 Cloudflare가 정적 파일 캐시 HIT를 직접 응답합니다. API 요청은 '
             'Nginx와 App A를 거쳐 Redis MISS 뒤 PostgreSQL을 조회하고, App B의 500은 사용자까지 반환됩니다. '
             'Pulse Ops는 15초 주기, 동시 최대 4개로 인스턴스별 /metrics·DB·Redis·SSH를 직접 수집해 SQLite에 저장합니다. '
             'Cloudflare API 수집과 외부 트래픽 카드에는 연동 예정 표시가 있으며 추가 구현 범위입니다. '
