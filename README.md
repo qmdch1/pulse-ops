@@ -1,358 +1,43 @@
 # PULSE / OPS
 
-등록한 서버·DB·캐시·애플리케이션을 직접 연결해 관측하는 대시보드입니다. **Go 단일 서비스 + HTML/CSS/JavaScript**로 동작합니다. 실행·빌드에 Node, npm, React, Next, 번들러가 필요하지 않습니다.
+서버·DB·Redis·HTTP·애플리케이션 상태와 장애 알림을 한 화면에서 관리하는 대시보드입니다. **Go 서비스 하나 + SQLite**로 동작하며 별도 프런트 빌드가 없습니다.
 
-## 구조
+## 주요 기능
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/architecture-flow-dark.svg">
-  <img alt="Pulse Ops 트래픽 흐름: 브라우저가 Go 서비스에서 정적 파일과 /api/monitoring 스냅샷을 받고, Go 스케줄러가 15초마다 슬롯 4개로 등록 인프라를 직접 수집해 SQLite에 저장하며, 터미널은 단회 티켓과 WebSocket을 거쳐 SSH PTY로 연결됩니다." src="docs/images/architecture-flow.svg" width="100%">
-</picture>
+- **통합 대시보드** — 여러 서버의 자원, 요청량·오류율·응답시간, DB·Redis 지표를 함께 확인합니다.
+- **인프라 관리** — 연결 정보 등록, CSV 일괄 등록, 연결 진단과 SSH 터미널을 제공합니다.
+- **장애 관리** — 이벤트 발생·복구, 처리 상태·메모, 점검 시간을 관리합니다.
+- **알림 연동** — 웹훅·Slack·Discord·Teams로 알림과 일간·주간 요약을 보냅니다.
 
-애니메이션은 네 경로를 한 장면씩 보여 줍니다. 실제로는 각 경로가 서로 독립적으로 동시에 동작하고, 점의 속도는 실제 지연이나 처리량이 아닙니다. 운영체제의 ‘동작 줄이기’ 설정을 켜면 정지된 구조도만 표시합니다.
+## 빠른 시작
 
-1. **화면 로드**: 브라우저가 Go에서 HTML, CSS, 네이티브 ES 모듈을 받습니다. 파일은 실행 파일에 포함되며 gzip·ETag로 전달합니다.
-2. **화면 갱신**: 브라우저 Worker가 같은 출처의 `/api/monitoring`에서 관측값을 읽고 이벤트 규칙을 평가합니다. 3초 안에 들어온 같은 범위·대상 조회는 공유 캐시로 응답하며, 화면 갱신은 수집을 호출하지 않습니다. 화면은 Canvas로 필요한 그래프를 그립니다.
-3. **수집**: Go 수집기는 화면 요청과 독립적으로 15초마다 실행합니다. 동시 수집은 최대 4개이고 등록 ID마다 하나씩만 진행합니다. 슬롯이 모두 차면 다음 대상은 빈 슬롯을 기다립니다. 등록한 SSH·DB·Redis·HTTP·애플리케이션에 직접 접근하고 결과를 SQLite에 저장합니다.
-4. **터미널**: 터미널을 열 때만 내장된 xterm 파일을 읽습니다. 30초 단회 티켓 → WebSocket → Go SSH PTY 경로로 실제 셸을 연결합니다. 감사 기록에는 연결·종료만 남기고 입력·출력 본문은 보관하지 않습니다.
-5. **저장**: 등록 정보는 AES-256-GCM으로 암호화하고 관측·감사 기록은 같은 SQLite 볼륨에 저장합니다. 관측 보존은 15일, 감사 보존은 90일입니다.
-
-HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사용합니다. 애플리케이션 자체에 별도 Nginx·Node 컨테이너는 필요하지 않습니다. Prometheus/Grafana는 선택적 분석 도구이며 인프라 등록이나 기본 동작의 필수 요소가 아닙니다.
-
-## Cloudflare DNS·프록시 구성 예시
-
-공인 IP가 있는 서버에서 Cloudflare DNS·프록시와 Nginx를 사용하는 **배치 예시**입니다. `app.example.com`은 프런트와 `/api`, `ops.example.com`은 Pulse Ops 관리 화면으로 연결합니다. DB·Redis·각 백엔드의 `/metrics`는 내부망에서 직접 수집합니다.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cloudflare-traffic-flow-dark.svg">
-  <img alt="Cloudflare 구성 예시 애니메이션: DNS 조회, CDN 캐시 HIT, Nginx·백엔드·Redis·DB 요청과 500 반환, Pulse Ops의 내부 지표 수집, 관리 화면 조회를 순서대로 보여 줍니다. Cloudflare API 연결은 연동 예정이며 모든 수치는 가상의 5분 표본입니다." src="docs/images/cloudflare-traffic-flow.svg" width="100%">
-</picture>
-
-40초 반복 영상은 **접속·캐시 응답 → API·DB 처리 → 500 오류 응답 → 내부 지표 수집 → 통합 화면 예시**의 5단계입니다. DNS 조회와 캐시 응답은 첫 장면에 함께 표시합니다. 수치·속도는 설명용 가상값이며, ‘동작 줄이기’ 설정에서는 정지 화면을 표시합니다.
-
-| 가상의 5분 표본 | 예시값 | 관계 |
-| --- | --- | --- |
-| Cloudflare 서비스(app) 외부 요청 | 10,000건 | CDN HIT 6,000건 + 원본 전달 4,000건 |
-| App A | 요청 2,500건 · 5xx 10건 · P99 240ms | 오류율 0.40% |
-| App B | 요청 1,500건 · 5xx 5건 · P99 180ms | 오류율 약 0.33% |
-| 내부 인프라 | 서버 CPU 38% · RAM 62% · DB 연결 24개 · Redis HIT 96% | 각 대상에서 별도로 얻는 관측값 |
-
-트래픽 표본은 서비스 도메인(app)만 집계하며 관리 도메인(ops)은 별도입니다. 외부 요청 10,000건과 원본 요청 4,000건을 더하지 않습니다. 원본 요청 4,000건은 A 2,500건 + B 1,500건이며, CDN에서 끝난 6,000건은 백엔드에 도착하지 않습니다. 앱 요청의 Redis MISS는 경로 설명을 위한 한 건이고, Redis HIT 96%는 별도 명령 집계 예시입니다. P99는 인스턴스별 Histogram에서 얻는 예시값이며 서로 평균 내지 않습니다.
-
-**현재 지원:** 인스턴스별 애플리케이션 `/metrics`, DB·Redis 직접 조회, 서버 SSH 수집과 SQLite 저장. 앱의 요청량·오류율·P99는 연속 5분 표본이 쌓여야 표시합니다. 그림의 수집기는 최대 4개를 동시에 조회하고 첫 슬롯이 비면 다섯 번째 대상인 서버 SSH를 조회합니다.
-
-**추가 구현 범위:** 그림의 주황 점선 **Cloudflare Analytics API** 연결과 외부 트래픽 카드는 연동 예정인 설계입니다. Cloudflare·Nginx 원문 로그를 수집·검색하는 기능도 현재 지원 범위에 포함되지 않습니다. Cloudflare API의 조회 항목·기간은 [요금제와 데이터셋](https://developers.cloudflare.com/analytics/graphql-api/limits/)에 따라 달라집니다.
-
-Cloudflare DNS의 [프록시를 켜야](https://developers.cloudflare.com/dns/proxy-status/) 웹 요청이 Cloudflare를 통과합니다. DNS only는 주소 조회만 제공합니다. 이 예시에서는 원본 인증서와 [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/)를 사용하고, API·관리 화면은 캐시를 우회합니다. 관리용 Nginx는 외부 Host·Origin과 WebSocket Upgrade를 전달하며, Pulse Ops 운영 계정으로 로그인합니다.
-
-## 애플리케이션의 /metrics 구축
-
-**각 애플리케이션 인스턴스가 자신의 요청 집계값을 제공해야 합니다. API 목록을 Pulse Ops에 하나씩 등록할 필요는 없습니다.** 같은 앱을 여러 서버에서 실행하면 공통 미들웨어 코드를 한 번 추가해 배포하고, 각 서버의 `/metrics` 주소를 따로 등록합니다.
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/application-metrics-flow-dark.svg">
-  <img alt="사용자 요청이 각 애플리케이션의 공통 미들웨어를 지나고, 실제 응답 코드와 시간을 Counter·Histogram에 집계합니다. 각 인스턴스의 /metrics를 Pulse Ops가 15초마다 읽어 연속 5분 증가량으로 오류율과 P99를 계산하며, 같은 그래프에 인스턴스별 선을 표시합니다. /health 응답과 전체 오류율은 별개입니다." src="docs/images/application-metrics-flow.svg" width="100%">
-</picture>
-
-애니메이션은 정상 요청 → 500 응답 집계 → 두 인스턴스의 `/metrics` 수집 → 지표 계산 순서입니다. 그림의 수치와 이동 속도는 설명용 예시이며, ‘동작 줄이기’ 설정에서는 정지된 구조를 표시합니다.
-
-### 1. 요청이 끝날 때 공통 처리부에서 집계
-
-언어별 [Prometheus 클라이언트 라이브러리](https://prometheus.io/docs/instrumenting/clientlibs/)를 사용합니다. 모든 업무 요청이 거치는 미들웨어·필터에 **최종 응답 코드별 Counter 증가**와 **응답시간 Histogram 기록**을 넣습니다. 정상 응답뿐 아니라 4xx, 예외가 변환된 5xx도 포함하고, 계측용 `/metrics`와 `/health`는 업무 요청 집계에서 제외합니다. 집계는 메모리에 유지하며 `/metrics`를 읽을 때마다 초기화하지 않습니다.
-
-| Pulse Ops가 읽는 이름 | 제공 형태 | 표시 지표 |
-| --- | --- | --- |
-| `http_requests_total{status="200"}` | Counter · 응답 코드별 누적 건수. `status="500"`, `"502"`, `"503"` 등도 같은 이름으로 제공 | 요청/초, 5xx·4xx 비율 |
-| `http_request_duration_seconds` | Histogram · 초 단위의 누적 `_bucket{le="…"}`, `_sum`, `_count` | P99 등 백분위, 평균 응답시간 |
-| `app_process_cpu_percent` | Gauge · 프로세스 CPU %. 코어 하나를 모두 사용하면 100 | CPU 사용률 |
-| `process_resident_memory_bytes` | Gauge · 실제 프로세스 상주 메모리의 바이트 수 | 메모리 MiB |
-| `app_cpu_limit_cores` | Gauge · 컨테이너에 할당된 CPU 코어 수, 선택 제공 | CPU 사용률의 기준(예: `0.5 코어 기준`) |
-| `app_cpu_usage_seconds_total` | Counter · 컨테이너 전체가 사용한 CPU 시간(초), 선택 제공 | CPU 사용률(할당 코어 대비) |
-| `app_memory_limit_bytes` | Gauge · 컨테이너 메모리 한도의 바이트 수, 선택 제공 | RAM 사용률의 기준(예: `192 MiB 기준`) |
-| `app_memory_usage_bytes` | Gauge · 회수 가능한 캐시를 뺀 컨테이너 메모리의 바이트 수, 선택 제공 | RAM 사용률(한도 대비) |
-| `app_active_requests` | Gauge · 현재 처리 중인 업무 요청 수, 선택 제공 | 인프라 상세의 동시 요청 |
-
-처음 두 지표만으로 요청량·오류율·P99를 표시할 수 있습니다. **현재 수집기는 위 이름과 `status` 라벨을 직접 읽습니다.** 프레임워크 기본 이름이나 `code` 라벨이 다르면 이 계약에 맞춰 내보내야 합니다. P99는 Summary의 사전 계산값 대신 Histogram 버킷으로 제공합니다. 측정하지 않은 지표는 가짜 0으로 채우지 않습니다.
-
-컨테이너로 실행하는 애플리케이션이 `app_cpu_*`·`app_memory_*` 네 지표를 제공하면, SSH로 등록한 컨테이너와 같은 `docker stats` 기준으로 할당 대비 CPU·RAM 사용률을 계산해 대시보드 맨 위 기본 리소스에 서버와 함께 표시합니다(예: `12 % · 0.5 코어 기준`, `24 % · 192 MiB 기준`). 값은 컨테이너 안의 `/sys/fs/cgroup`에서 읽습니다.
-
-- CPU 할당: cgroup v2 `cpu.max`(v1 `cpu.cfs_quota_us`÷`cpu.cfs_period_us`)의 쿼터를 쓸 수 있는 CPU 수로 제한한 값. 쿼터가 없으면 쓸 수 있는 CPU 수
-- CPU 시간: v2 `cpu.stat`의 `usage_usec`÷10⁶(v1 `cpuacct.usage`÷10⁹). 수집 시각과 맞도록 `/metrics`를 읽을 때마다 새로 읽습니다
-- 메모리 한도: v2 `memory.max`(v1 `memory.limit_in_bytes`). 한도가 없거나 호스트 RAM 이상이면 호스트 전체 RAM
-- 메모리 사용량: v2 `memory.current` − `memory.stat`의 `inactive_file`(v1 `memory.usage_in_bytes` − `total_inactive_file`)
-
-CPU 사용률은 직전 수집 이후 CPU 시간 증가량 ÷ 경과 시간 ÷ 할당 코어 × 100이며, 첫 수집이나 카운터가 줄어든(재시작) 구간은 표시하지 않습니다. 컨테이너가 아니라서 자기 cgroup이 없으면(호스트 루트 cgroup은 기계 전체 값) 사용량은 프로세스 CPU 시간·RSS로, 할당은 쓸 수 있는 CPU 수·호스트 RAM으로 보고합니다. 네 지표를 제공하지 않으면 기존처럼 프로세스 CPU·RSS만 표시합니다.
-
-전체 오류율에는 `route`가 필요 없습니다. 경로별 집계를 추가한다면 `/users/123` 대신 `/users/{id}` 같은 라우트 템플릿을 쓰고 사용자 ID·쿼리·토큰을 라벨에 넣지 않습니다. 현재 Pulse Ops는 전체 요청 지표를 합산하며, 라우트별 오류율 상세 수집은 아직 구현되지 않았습니다.
-
-### 2. GET /metrics에서 누적값을 텍스트로 반환
-
-`HTTP 200`과 `Content-Type: text/plain; version=0.0.4; charset=utf-8`의 Prometheus 텍스트를 반환합니다. JSON이나 현재 오류율 숫자만 반환하면 이 수집기는 읽을 수 없습니다. 라이브러리의 출력 함수를 사용하면 타입·이스케이프·누적 버킷을 직접 만들 필요가 없습니다.
-
-<details>
-<summary>응답 예시 — 실제 누적값은 클라이언트 라이브러리가 생성합니다</summary>
-
-```text
-# HELP http_requests_total Completed business HTTP requests
-# TYPE http_requests_total counter
-http_requests_total{status="200"} 980
-http_requests_total{status="500"} 10
-http_requests_total{status="503"} 10
-# HELP http_request_duration_seconds Business HTTP response duration in seconds
-# TYPE http_request_duration_seconds histogram
-http_request_duration_seconds_bucket{le="0.1"} 900
-http_request_duration_seconds_bucket{le="0.5"} 980
-http_request_duration_seconds_bucket{le="1"} 995
-http_request_duration_seconds_bucket{le="+Inf"} 1000
-http_request_duration_seconds_sum 123
-http_request_duration_seconds_count 1000
-```
-
-Counter는 프로세스 시작 이후의 누적값입니다. Pulse Ops는 **최근 5분의 증가량**으로 `5xx 증가량 ÷ 전체 요청 증가량 × 100`을 계산합니다. 시작 후 연속 5분 표본이 쌓여야 하며, 요청이 없거나 카운터가 리셋된 구간은 오류율 0%로 추측하지 않습니다.
-
-</details>
-
-### 3. 실행 예제와 인프라 등록
-
-[Python 실행 예제](examples/metrics-app/app.py)는 공통 WSGI 미들웨어, 정상 API, 500 예외 처리, `/health`, `/metrics`를 포함합니다. 아래 명령은 Linux·macOS·WSL용이며 저장소 루트에서 실행합니다.
+Git과 Docker Compose가 설치된 환경에서 실행합니다.
 
 ```sh
-python3 -m venv .local/metrics-venv
-. .local/metrics-venv/bin/activate
-python -m pip install -r examples/metrics-app/requirements.txt
-python examples/metrics-app/app.py
-```
-
-다른 터미널에서 실제 요청과 응답을 확인합니다. `/api/fail`의 500은 실패 집계 검증용입니다.
-
-```sh
-curl -i http://127.0.0.1:18080/api/items
-curl -i http://127.0.0.1:18080/api/fail
-curl http://127.0.0.1:18080/metrics
-```
-
-예제는 단일 프로세스·비스트리밍 WSGI용입니다. Linux에서는 메모리 지표도 제공하며 CPU는 직전 수집 이후의 프로세스 CPU 시간으로 계산합니다. 할당 대비 CPU·RAM 지표는 `ContainerCollector`가 `/metrics`를 읽을 때마다 cgroup에서 읽습니다. `docker run --cpus 0.5 --memory 192m`처럼 제한을 둔 컨테이너에서 실행하면 `app_cpu_limit_cores 0.5`, `app_memory_limit_bytes 201326592`가 나옵니다. 실제 Flask·FastAPI·Django 등에는 공통 응답 완료 훅으로 집계 코드를 적용하고, 다중 워커는 [클라이언트의 다중 프로세스 설정](https://prometheus.github.io/client_python/multiprocess/)을 적용해야 전체 워커 값이 합쳐집니다.
-
-인프라 관리에서 유형을 **애플리케이션**으로 선택하고, 서비스 URL에 `https://app-a.internal`, 애플리케이션 계측 URL에 `https://app-a.internal/metrics`를 입력해 저장한 뒤 **연결 시작**을 누릅니다. 계측 URL을 비우면 서비스 URL의 경로 뒤에 `/metrics`를 붙입니다. 다른 인스턴스도 같은 방식으로 각각 등록합니다.
-
-수집기가 접근할 수 있는 인스턴스별 주소를 사용합니다. 부하분산 URL 하나를 등록하면 매번 다른 서버의 누적값을 읽을 수 있어 서버별 관측이 깨집니다. 예제 기본 주소 `127.0.0.1`은 로컬 확인용이며, Docker 안에서 실행되는 Pulse Ops의 `localhost`는 그 컨테이너 자신입니다. 수집망에서 접근 가능한 주소·인터페이스로 연결하고, 운영 `/metrics`는 수집기만 접근하도록 제한합니다. HTTP 기본 인증은 등록 화면의 username/password를 사용합니다.
-
-`/health`가 200이어도 업무 API가 500일 수 있습니다. SSH로 서버 자원만 수집하거나 `/health`만 조회하면 업무 요청의 오류율·P99는 알 수 없습니다. 요청 계측과 텍스트 출력은 [Prometheus 계측 지침](https://prometheus.io/docs/practices/instrumentation/)과 [Python 클라이언트 HTTP 문서](https://prometheus.github.io/client_python/exporting/http/)를 참고하세요.
-
-## 화면과 그래프
-
-- **대시보드**: 선택한 인프라의 핵심 운영 지표를 보여주며, 선택 대상·조회 기간·새로고침을 이름 있는 보기로 저장합니다. 현재 이벤트를 클릭하면 발생 근거와 관련 지표를 조사합니다.
-- **인프라 관리**: 등록·연결 정보 수정, CSV 일괄 등록, 선택 연결/일시정지/공통 설정 변경, 설정 복제, 태그 검색, 실제 연결 진단, 상세 그래프와 SSH 터미널을 제공합니다.
-- **이벤트**: 현재 이벤트, 규칙별 발생 조건·지속 시간·상태, 처리 이력·메모, 알림 전송 이력과 수집 기록을 보여줍니다. 상세에는 발생 대상과 등록된 의존 관계의 지표를 표시합니다.
-- **환경설정**: 웹훅·Slack·Discord·Microsoft Teams 연동, 수신 대상 분기·알림 묶음·일간/주간 요약, 메시지 미리보기·복제, 음소거·점검 시간, 전송 이력·재전송, 화면 갱신과 관측 데이터 내보내기를 관리합니다.
-
-대시보드에서 여러 인프라를 선택하면 같은 지표를 자동으로 한 그래프에 모읍니다. 예를 들어 서버 두 대를 선택하면 CPU 그래프 하나와 메모리 그래프 하나에 각각 두 서버의 선을 표시하며, 범례에서 서버를 구분합니다. 기존에 저장한 보기 방식과 관계없이 적용됩니다.
-
-대시보드는 [트래픽·지연·오류·포화 중심의 운영 관측 원칙](https://sre.google/sre-book/monitoring-distributed-systems/)에 맞춰 인프라 종류별로 표시 지표를 제한합니다. 맨 위에 서버와 애플리케이션 컨테이너의 CPU·RAM 사용률, 서버 디스크 사용량을 ‘기본 리소스’ 한 칸으로, 그다음 응답 시간 분포 한 줄을 보여 주고, 이어서 트래픽·프로세스·네트워크 송수신·데이터베이스·Redis 줄과 짝이 없는 단독 그래프(HTTP 응답시간 등)를 차례로 보여줍니다. CPU와 RAM은 0~100% 같은 축을 쓰고, 디스크는 아래 설명처럼 전체 용량 기준 축을 씁니다. 사용률 옆에는 무엇을 기준으로 잰 값인지(예: `2.3 % · 64 MiB 기준`, `1.4 % · 12 코어 기준`)를 함께 표시합니다.
-
-SSH로 등록한 서버가 컨테이너이면 CPU·RAM은 그 컨테이너에 할당된 자원 대비 자기 사용량으로 계산합니다. `docker stats`와 같은 기준으로, RAM은 메모리 한도(없으면 Docker VM 전체) 대비 회수 가능한 캐시를 뺀 사용량, CPU는 CPU 쿼터(없으면 쓸 수 있는 코어) 대비 cgroup CPU 시간입니다. 애플리케이션은 `/metrics`로 선택 지표 `app_cpu_*`·`app_memory_*`를 제공할 때 같은 기준으로 계산합니다. 컨테이너 안에서 보이는 Docker VM 전체 CPU·RAM·디스크·부하·가동시간은 같은 커널(boot id)을 쓰는 컨테이너끼리 묶어 **Docker 호스트** 하나로 저장하고, 그 컨테이너 중 하나를 선택하면 대시보드에 함께 표시합니다. Docker 호스트는 등록 인프라가 아니므로 인프라 관리 목록과 선택 버튼에는 나오지 않습니다. 컨테이너별 디스크 할당은 Docker에 따로 없어서 디스크는 Docker 호스트로만 표시합니다. 디스크와 서버 자체의 CPU·RAM은 서버 지표라서, 선택한 인프라에 서버가 하나도 없으면 맨 위에 안내와 **서버 함께 보기** 버튼을 표시합니다. 새 버전이 배포되면 열려 있는 화면은 다음 갱신 때(최대 1분) 스스로 새로고침합니다. 상세 창·드래그·입력 중에는 끝날 때까지 기다립니다. 제품의 표시 목록은 `control-plane/web/lib/board.js`의 `dashboardMetrics`에서 관리합니다.
-
-| 인프라 | 대시보드 지표 |
-| --- | --- |
-| 애플리케이션 | 컨테이너 CPU·RAM 사용률(할당 대비, 선택 지표 제공 시 ‘기본 리소스’ 줄), 응답 시간 P50·P95·P97·P99·P99.9(‘응답 시간 분포’ 한 줄), 요청량·서버 오류율(‘트래픽’ 한 줄), 프로세스 CPU·메모리(‘프로세스’ 한 줄) |
-| 서버 | CPU 사용률·RAM 사용률·디스크 사용량(‘기본 리소스’ 한 줄), 가장 바쁜 프로세스 CPU(애플리케이션과 함께 선택하면 ‘프로세스’ 줄), 네트워크 수신·송신(한 줄) |
-| PostgreSQL | 응답시간, 트랜잭션 처리량, 연결 수, 잠금 수(‘데이터베이스’ 한 줄) |
-| MySQL·MariaDB·Oracle | 응답시간, 명령 처리량, 연결 사용률, 잠금 대기(‘데이터베이스’ 한 줄) |
-| Redis | 응답시간, 명령 처리량, 메모리 사용량, 적중률(‘Redis’ 한 줄) |
-| HTTP | 응답시간(단독 그래프) |
-
-디스크 사용량 그래프의 Y축 최대는 함께 표시한 서버 중 가장 큰 전체 용량입니다. 범례와 툴팁은 `20.7 / 1,006.9 GiB`처럼 사용량과 그 서버의 전체 용량을 함께 보여 주고, 축 최대보다 작은 디스크는 자기 전체 용량을 같은 색의 옅은 점선으로 표시합니다. 범례에서 서버를 숨기면 남은 서버 중 가장 큰 용량으로 축을 다시 맞춥니다.
-
-관측값이 없는 지표와 수집 내부 지표, 평균 응답시간, 만료·정책·예측 등 조사용 지표는 대시보드에 나오지 않습니다. 이전에 저장한 미관측·비교 설정도 이 목록을 늘리지 않습니다. 수집 데이터와 이벤트 판정은 그대로 유지하며, 인프라 상세와 이벤트에서 세부 지표를 볼 수 있습니다.
-
-인프라 이름 버튼을 한 번 누르면 선택하거나 해제합니다. **전체** 버튼도 선택과 해제를 한 번에 전환합니다. 12개를 넘으면 검색을 제공하며, 검색 중 전체 선택은 검색 결과에만 적용됩니다.
-
-그래프는 지표 이름, 축 범위, 인프라별 값만 기본 표시합니다. 범례를 누르면 선을 숨기거나 다시 표시합니다. 지표 이름을 누르면 상세 그래프를 크게 엽니다. 시계열 분리와 **1~3600초 개별 갱신**은 그래프 설정 버튼에서 엽니다. 빈 갱신 값은 전체 설정을 따릅니다. 합치기·분리 후에는 제목 옆 되돌리기 버튼으로 바로 복원합니다. 조합과 갱신 설정은 이 브라우저에 저장됩니다. 화면 갱신 중에도 범례의 키보드 포커스와 선 숨김 상태를 유지합니다.
-
-그래프 왼쪽 위 손잡이 `⠿`를 잡아 다른 그래프 위에 놓아도 합쳐집니다. 빈 공간에 놓거나 Esc를 누르면 취소합니다. 손잡이를 클릭하거나 설정의 **합치기**를 열고, 대상 이름을 누르면 즉시 합쳐집니다. 키보드·터치에서도 사용할 수 있습니다.
-
-화면 전환, 카드 표시와 상세 창에는 짧은 등장 애니메이션을 적용하고, 바뀐 숫자는 잠깐 강조합니다. 정기 갱신 때 전체 화면이 다시 등장하지는 않습니다. 운영체제의 ‘동작 줄이기’ 설정을 켜면 애니메이션을 생략합니다. 인프라 목록은 좁은 화면에서 관리 버튼까지 바로 보이도록 배치합니다.
-
-같은 값을 백분위·기간·방향·정책만 달리해 잰 지표는 작은 그래프 한 줄로 묶습니다. 인프라·이벤트 상세의 응답 시간 P50·P95·P97·P99·P99.9·평균, 성공·실패 요청 P99, 이벤트 루프 P99·최대, 오류 예산 5분·1시간, 쿠키 Secure·HttpOnly·SameSite, 서버 디스크 전체·남은 용량과 대시보드의 기본 리소스(CPU·RAM 사용률, 디스크 사용량), 응답 시간 P50~P99.9, 네트워크 수신·송신, DB 수신·송신이 대상이며 두 개 이상 관측될 때만 묶습니다. 한 줄은 같은 Y축을 써서 높이로 바로 비교되고, 인프라 색은 줄 전체에서 같습니다. 한 대상의 서로 다른 신호도 한 줄로 묶습니다. 트래픽(요청량·5xx 오류율), 프로세스(CPU·메모리), 데이터베이스(응답·트랜잭션·명령·연결·연결 사용률·잠금·잠금 대기), Redis(응답·명령·메모리·적중률)가 대상이며, 기본 리소스처럼 단위가 같은 카드만 축을 함께 쓰고 나머지는 자기 축을 씁니다. 데이터베이스 줄은 연결 수와 잠금 수처럼 단위가 같아도 다른 양이라 카드마다 축을 따로 씁니다. PostgreSQL과 MySQL 계열을 함께 선택하면 각 카드는 그 지표를 보내는 DB만 표시하고, 카드가 많아 좁아지면 여러 줄로 나눕니다. 인프라·이벤트 상세에서도 같은 묶음을 쓰며 짝 없이 하나만 관측된 지표는 일반 그래프로 남습니다. 줄 위 범례로 한 인프라를 모든 카드에서 함께 숨기며, 카드 하나가 150px보다 좁아지면 3+3, 2+2+2처럼 고르게 나눕니다. 카드에서도 지표 이름은 상세를, 설정 버튼은 갱신·분리·합치기를 엽니다. 합치거나 분리한 그래프는 원래 크기로 표시되고, 해제하면 줄로 돌아옵니다.
-
-화면 갱신은 실제 수집을 호출하지 않습니다. 1초로 설정해도 실제 수집은 15초 간격이며 API의 3초 공유 캐시를 재사용할 수 있습니다. 화면이 숨겨지면 조회를 중지합니다. 개별 갱신은 화면에 보이는 그래프를 기준으로 요청 주기를 조정합니다.
-
-같은 시간축과 커서를 공유하고 **최대 2개 단위·8개 선**으로 나눠 모든 선택 시계열을 유지합니다. 서로 다른 인프라의 P99나 비율을 평균내지 않습니다. 미관측 구간을 0이나 가짜 보간으로 채우지 않습니다. 긴 목록은 필요할 때만 차트를 생성·그립니다.
-
-그래프의 Y축은 지표별 기본 범위를 유지하고, 선택한 기간에 그 범위를 넘는 관측값이 있으면 실제 최대값까지 확장합니다. 작은 정상 변화를 그래프 전체 높이로 확대하지 않습니다. 여러 지표를 합치면 같은 단위의 기본 범위 중 가장 넓은 것을 쓰고, 숨긴 선이나 조회 기간 밖의 값은 확장에 포함하지 않습니다. 만료·예상 여유 공간의 음수도 유지합니다.
-
-| 지표 | 기본 Y축 범위 |
-| --- | --- |
-| P50·P95·P97·P99·P99.9, 평균·성공·실패·API 응답시간 | 0~1초 |
-| DB 응답·쿼리·커넥션 획득, GC·이벤트 루프 지연 | 0~500ms |
-| 디스크 지연·DNS·Redis PING | 0~100ms |
-| CPU·메모리·디스크·풀 사용률, 캐시 적중률·가용성 | 0~100% |
-| 오류·재전송·롤백·인증 실패율 | 0~5% 또는 0~10% |
-| 연결·정책 상태 / HTTP 응답 코드 | 0~1 / 0~600 |
-| 프로세스·Redis·스왑 메모리 / 네트워크 / DB 송수신 | 0~1GiB / 0~128MiB/s / 0~1MiB/s |
-| 호스트·DB 가동시간 / 쿠키·토큰·TLS 만료 | 0~1일 / 0~1시간·7일·90일 |
-
-123개 지표의 표시 기준은 `control-plane/web/data/metrics.json`의 `axisMax`에 명시합니다. 처리량·연결 수·큐 깊이 등 규모에 따라 달라지는 지표에도 초기 표시 범위를 두고 관측값에 맞춰 확장합니다. 이 기준은 제품의 그래프 표시 기본값이며 운영 SLO나 경보 임계값을 바꾸지 않습니다. Y축은 초·분·시간·일, GiB, MiB/s 등 읽기 쉬운 단위로 표시하며 범례·툴팁의 원래 값과 단위는 유지합니다.
-
-## 테스트 환경 실행
-
-Docker Compose만 있으면 빌드·실행할 수 있습니다. 아래 `.local` 폴더는 선택적인 SSH 후보 파일을 위한 로컬 경로입니다.
-
-```sh
+git clone https://github.com/qmdch1/pulse-ops.git
+cd pulse-ops
 mkdir -p .local/ssh
 docker compose -f compose.test.yml --profile dashboard up -d --build
 ```
 
-대시보드: [localhost:13000](http://localhost:13000) · 테스트 프런트: [localhost:18480](http://localhost:18480)
+[localhost:13000](http://localhost:13000)에 접속하면 테스트 인프라가 자동 등록됩니다. 이 구성은 로컬 테스트용이며, 실제 서버 운영은 [운영 배포 안내](docs/setup.md#운영-배포)를 따릅니다.
 
-API 서버 3대, PostgreSQL, Redis, HTTP 프런트, SSH bastion과 node를 등록합니다. 테스트 비밀번호/키는 격리된 테스트 대상 전용입니다. DB와 SSH 포트는 호스트에 공개하지 않습니다.
+인프라는 등록 후 **연결 시작**, 알림은 환경설정에서 **테스트 전송 → 자동 알림 활성화**를 선택합니다. 앱의 오류율·P99는 각 인스턴스에 [`/metrics` 계측](docs/application-metrics.md)이 필요합니다.
 
-MySQL·MariaDB·Oracle까지 검증하는 확장 구성:
+## Cloudflare DNS·프록시 구성 예시
 
-```sh
-docker compose -f compose.test.yml -f compose.test.databases.yml --profile dashboard up -d --build
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/cloudflare-traffic-flow-dark.svg">
+  <img alt="Cloudflare·Nginx를 통과하는 서비스 요청과 Pulse Ops의 내부 지표 수집 흐름. 가상 예시값이며 Cloudflare API는 연동 예정입니다." src="docs/images/cloudflare-traffic-flow.svg" width="100%">
+</picture>
 
-이 구성은 11개 인프라를 등록합니다. [DB별 연결·권한·지표 범위](docs/database-engines.md)를 확인하세요. Oracle 테스트 컨테이너에는 약 2.3GiB의 메모리 한도가 별도로 필요합니다.
+Cloudflare·Nginx를 사용하는 배치 예시입니다. **수치는 가상값이며, Cloudflare API 연결은 연동 예정**입니다. [구조·수집 방식 자세히 보기](docs/architecture.md)
 
-Prometheus·Grafana·exporter는 필요할 때만 추가합니다.
+## 상세 문서
 
-```sh
-docker compose -f compose.test.yml --profile observability up -d
-```
-
-Prometheus: [localhost:19090](http://localhost:19090) · Grafana: [localhost:13001](http://localhost:13001), 테스트 계정 `pulse` / `pulse_test_only`.
-
-애플리케이션 변화율과 P50/P95/P97/P99/P99.9는 연속 5분 표본이 쌓인 후 계산합니다. 한 시간 SLO는 한 시간 표본이 필요합니다. 재시작·수집 공백·카운터 리셋 후에는 충분한 표본이 다시 확보될 때까지 미관측입니다. 테스트 API 수는 `--scale backend=5`로 변경한 뒤 `control-plane`을 재시작해 발견할 수 있습니다. 이전 주소나 사용자가 편집한 등록은 자동으로 삭제·덮어쓰지 않습니다.
-
-## 운영 배포
-
-`compose.prod.yml`은 **Go 서비스 하나와 registry 볼륨**만 구성합니다. 테스트 대상·초기 등록·브라우저 테스트 페이지는 운영 바이너리에 포함되지 않습니다.
-
-1. `.env.prod.example`을 `.env.prod`로 복사합니다.
-2. 운영 username, 24자 이상 비밀번호, 32바이트 난수의 base64 암호화 키, 정확한 HTTPS origin을 설정합니다.
-3. 아래 명령으로 실행합니다. 지정한 서버 주소는 이후 인프라 등록 화면에서 입력합니다.
-
-```sh
-docker compose --env-file .env.prod -f compose.prod.yml up -d --build
-```
-
-기본 포트는 `127.0.0.1:13000`입니다. 기존 HTTPS 앞단은 외부 **Host와 Origin을 유지**하고 WebSocket Upgrade를 전달해야 합니다. Go가 직접 HTTPS를 제공하려면 인증서 파일을 읽기 전용으로 마운트하고 `PULSE_TLS_CERT`, `PULSE_TLS_KEY`, 리스닝 주소/포트를 함께 지정합니다. 운영에는 자동 등록이 없습니다.
-
-기존 v2에서 전환할 때 SQLite 볼륨과 `CONTROL_MASTER_KEY`를 그대로 보존합니다. 이전 gateway와 dashboard 서비스만 중지·제거하고 새 Go 서비스를 시작합니다. `down -v`를 사용하지 마세요. 별도 `CONTROL_API_TOKEN`은 서비스 간 프록시가 사라져 더 이상 필요하지 않습니다.
-
-암호화 키는 DB 백업과 별도로 보관하세요. 현재는 단일 워크스페이스·단일 운영 계정·단일 SQLite 인스턴스입니다. 조직 SSO/RBAC, 다중 고객 격리, HA와 장기 사건 이력은 추가 구현 범위입니다. [검증 범위와 운영 과제](docs/production-readiness.md)를 참고하세요.
-
-## 연결과 지원 범위
-
-주소, username/password, PEM/OpenSSH 키, passphrase, SSH jump, 서버 지문과 의존 관계를 입력할 수 있습니다. 빈 값은 초안으로 저장되며 **저장과 실제 연결은 별도 동작**입니다. 저장된 비밀값은 응답에 포함되지 않고, 변경하지 않으면 유지되며 명시적으로 비울 때만 삭제됩니다.
-
-- 서버: SSH 고정 조회 명령으로 Linux `/proc`·`df`, macOS `top`·`vm_stat`, Windows PowerShell CIM을 읽습니다. 디스크 용량은 루트(/) 마운트(Windows는 시스템 드라이브) 기준입니다. 가장 바쁜 프로세스 CPU는 Linux에서 수집 주기 사이 `/proc/<pid>/stat` CPU 틱 변화량(한 코어=100%)으로, Windows에서 프로세스 성능 카운터로 계산하며 macOS는 아직 수집하지 않습니다. 첫 수집 뒤 다음 주기부터 표시됩니다. 최대 8홉 jump와 고정 호스트 키 검증을 지원합니다.
-- DB: PostgreSQL, MySQL, MariaDB, Oracle의 읽기 전용 모니터링 경로와 `SELECT 1` 왕복, DB별 통계를 지원합니다. Oracle은 Service name/SID를 구분합니다. 실제 업무 테이블은 조회하지 않습니다.
-- 캐시·서비스: Redis PING/INFO, HTTP 응답·TLS 만료, 애플리케이션 `/metrics`의 카운터·히스토그램을 직접 수집합니다.
-- 지표 123개·규칙 58개: [참고 글과 기능 대응표](docs/coverage.md). 앱 내부 GC·세션·쿠키 만료·Kubernetes/JVM·주간 기준선 등에는 별도 계측과 충분한 이력이 필요합니다. 주소만으로 추측하지 않습니다.
-
-이벤트는 같은 등록 ID의 측정값으로 독립 평가합니다. 연결 관계는 관련 그래프를 추가하며 다른 서버의 값을 판정에 대신 사용하지 않습니다. 서버도 수집 결과로 이벤트를 평가해 활성 연동으로 발생·복구를 전송합니다. 전송 상태와 대기열은 재시작 후 유지하며, 연결·수집·터미널 감사 기록과 장기 사건 이력은 구분합니다.
-
-## 이벤트 알림 연동
-
-환경설정 → **연동 추가**에서 수신처를 등록하고 **테스트 전송**으로 확인한 뒤 **자동 알림 활성화**를 켭니다. 긴급·주의 필터와 복구 알림을 연동마다 설정합니다. 최대 20개 연동을 등록할 수 있으며 Slack·Discord·Teams에는 HTTPS가 필요합니다. 일반 웹훅은 내부 HTTP 수신처와 선택적인 Bearer 인증도 지원합니다.
-
-| 전송 방식 | 수신처 설정 |
+| 필요한 내용 | 문서 |
 | --- | --- |
-| 일반 웹훅 | JSON을 받을 HTTP POST 주소. `source`, `version`, `event`를 전송하며 `event`에는 규칙 ID, 인프라 ID·이름·환경, 심각도, `firing`/`resolved`/`test` 상태, UTC 시각과 관측값이 포함됩니다. |
-| Slack | [Incoming Webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks/)에서 발급한 채널 주소. 일반 텍스트 블록으로 전송합니다. |
-| Discord | 채널 설정 → 연동 → 웹훅 주소. [확인 응답](https://docs.discord.com/developers/resources/webhook#execute-webhook)을 요청하고 자동 멘션을 막습니다. |
-| Microsoft Teams | [Workflows 웹훅 수신 템플릿](https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook)의 주소. 요청자 유형을 Anyone으로 설정한 흐름에 Adaptive Card를 전송합니다. 사용자 인증이 필요한 흐름은 별도 중계가 필요합니다. |
-
-주소 전체와 토큰은 AES-256-GCM으로 암호화하며 API에는 수신 호스트와 저장 여부만 반환합니다. 수정 시 비밀 입력란을 비워두면 기존 값을 유지합니다. 토큰 삭제는 별도 버튼으로 지정합니다. 테스트 전송은 저장한 수신처를 사용하며 자동 알림이 꺼져 있어도 실행할 수 있습니다.
-
-화면을 닫아도 알림은 동작합니다. 동일 발생 상태는 반복 등록하지 않고 복구 후 다시 발생하면 새 알림을 만듭니다. NULL·수집 공백·실패·오래된 표본은 수치 이벤트의 복구 근거로 사용하지 않습니다. 대상의 일시정지·수정·삭제와 수신처·필터 변경은 관련 대기 알림을 지웁니다. 이미 전송 중인 요청은 완료될 수 있습니다.
-
-전송 대기열과 활성 상태도 암호화해 SQLite에 보관합니다. 연동별 대기 한도는 1,000건이고 실패 요청은 최대 5회 시도하며 30·60·120·240초 간격으로 재시도합니다. 같은 사건의 발생·복구는 순서대로 처리합니다. HTTP 2xx를 성공으로 처리하고 리다이렉트는 따라가지 않습니다. 수신 후 응답 유실 시 재시도로 중복 수신할 수 있으므로 일반 웹훅 수신기는 이벤트 ID·상태·시각으로 중복을 처리해야 합니다. 오류 응답 본문과 주소는 전송 기록에 남기지 않습니다.
-
-알림 판정은 화면과 공유하는 `control-plane/web/data/event-rules.json`의 조건을 사용하며 최근 1시간을 15초 표본으로 평가합니다. 계측되지 않은 규칙은 발송하지 않습니다. Pulse Ops 프로세스 자체 중단(`collector`) 알림은 외부 감시가 필요합니다. 당직 교대·승인·에스컬레이션과 실제 메신저 계정/채널 권한 검증은 별도 범위입니다.
-
-### 운영 편의기능
-
-| 기능 | 사용 위치·동작 |
-| --- | --- |
-| 전송 이력·재전송 | 환경설정 또는 이벤트 → 알림 전송 이력. 대상·수신 연동·시도 횟수·결과·관측값을 검색합니다. 실패 기록은 현재 활성 수신처와 현재 필터로 재전송하며, 원래 기록도 유지합니다. |
-| 수신 채널 분기 | 연동 수정 → 수신 대상. 인프라 ID·환경·필수 태그·규칙을 선택합니다. 항목 안에서는 ID·환경·규칙이 OR, 필수 태그는 AND이며 서로 다른 조건은 AND입니다. 비운 조건은 전체입니다. |
-| 음소거·점검 시간 | 환경설정. 지금부터 15분/1시간 또는 시작·종료 시각을 지정합니다. 수집·이벤트 기록은 유지하며 종료 후에도 장애가 지속되면 다음 수집에서 발생 알림을 만듭니다. 대기 알림은 억제하고 이미 전송 중인 요청은 완료될 수 있습니다. 테스트 전송은 점검과 별개입니다. |
-| 이벤트 처리·메모 | 이벤트 → 처리 이력. 미처리/확인함/처리 중/처리 완료와 메모를 저장합니다. 실제 복구 상태와 별개이며 처리 완료만으로 알림을 멈추지 않습니다. NULL·수집 공백은 복구로 기록하지 않습니다. |
-| 연속 알림 묶기 | 연동 수정. 같은 규칙·환경·심각도의 발생 알림을 30/60/120초 기다려 최대 30개 대상으로 묶습니다. 복구는 개별 전송하며 원래 발생 전송보다 앞서지 않습니다. 각 대상의 전송 결과는 따로 남깁니다. |
-| 메시지 미리보기 | 저장된 연동의 미리보기. 수신 조건에 맞는 최근 이벤트 또는 명시된 예시 값을 실제 공급자 형식으로 표시합니다. 조건·관측값과 선택적 상세 링크를 포함하며 전송하지 않습니다. |
-| 일괄 등록·관리 | 인프라 관리. CSV 양식을 내려받아 최대 100개를 확인 후 초안 등록합니다. 표시된 대상 선택으로 연결/일시정지/환경·태그 변경을 수행하고 대상별 결과를 표시합니다. 설정 변경은 수집을 멈추므로 다시 연결 시작을 선택합니다. 전체 등록 상한은 200개입니다. |
-| 설정 복제 | 인프라 연결 정보의 설정 복제 또는 연동의 복제. 접속 설정·태그·필터를 복사합니다. 인증 정보와 웹훅 주소는 복사하지 않으며 초안/비활성 상태에서 다시 입력합니다. SSH 서버 지문도 별도로 확인합니다. |
-| 이름 있는 대시보드 | 대시보드의 현재 보기 저장. 선택 대상·조회 기간·새로고침을 서버에 저장해 브라우저 간 공유합니다. 선택 보기 관리에서 덮어쓰기·이름 변경·삭제할 수 있습니다. 삭제된 인프라는 적용 시 제외합니다. 개별 차트의 로컬 표시 설정은 포함하지 않습니다. |
-| 태그·전체 검색 | 인프라 연결 정보에 태그를 쉼표로 입력합니다. 목록·대시보드 선택에서 이름·주소·환경·태그를 검색하며 상단 검색은 인프라·이벤트 규칙·처리 이력의 메모·저장된 보기를 함께 찾습니다. |
-| 연결 진단 안내 | 인프라 상세의 연결 진단. DNS·TCP 포트와 실제 읽기 요청을 확인하며 인증·TLS·SSH 지문·통계 권한 안내를 표시합니다. SSH 경유 경로는 해당 프로토콜에서 검사합니다. 진단만으로 초안을 활성화하지 않습니다. |
-| 일간·주간 운영 요약 | 연동 수정에서 매일 또는 매주 월요일, 한국시간 발송 시각을 설정합니다. 범위 내 이벤트 발생·복구·미복구 수와 관측된 리소스 평균의 이전 동일 기간 대비 변화를 같은 수신처로 보냅니다. 비교 데이터가 없으면 없다고 표시합니다. |
-
-메시지 상세 링크를 넣으려면 서버의 `CONTROL_PUBLIC_URL`에 사용자가 접근하는 대시보드 주소를 설정합니다. 예: `https://pulse.example.invalid`. 주소를 지정하지 않으면 링크를 생략합니다.
-
-이벤트·처리 메모·전송 기록·점검 시간·저장된 보기는 SQLite에 암호화해 저장합니다. 이벤트/전송 기록은 최근 90일을 보존하고 이벤트 조회는 최근 수정 5,000건, 전송 조회는 최근 500건을 표시합니다. 저장된 보기와 점검 시간은 각각 100개, 인프라 태그는 20개까지 설정합니다. 메모는 사건당 100개, 한 메모당 2,000자입니다. 이벤트 기록은 연동이 없어도 서버의 수집·판정 시 생성됩니다.
-
-요약은 서버가 실행 중이어야 예약 시각 이후 생성되며, 같은 주기의 날짜는 재시작 후에도 중복 생성하지 않습니다. 중단 중 지나간 날짜를 소급 발송하지 않습니다. 점검 중에는 범위 내 요약을 억제합니다. 관측 원본의 15일 보존 한도 안에서 이전 일/주를 비교하고 대표 리소스 변화 최대 8개를 표시합니다. 현재 운영 계정 하나를 공유하므로 메모에 사용자별 작성자 식별은 없습니다. [편의기능 검증 범위](docs/operations-convenience-verification.md)를 참고하세요.
-
-SSH 후보 탐색은 선택적인 Python 도구입니다.
-
-```sh
-python scripts/discover-ssh.py
-```
-
-Windows `%USERPROFILE%/.ssh/config`, Linux/macOS `~/.ssh/config`, 명시한 `--config PATH`의 Host/HostName/User/Port/ProxyJump/Include만 읽습니다. 개인 키 자동 읽기, ProxyCommand/Match exec 실행, 자동 접속을 하지 않습니다. 결과 `.local/ssh/hosts.json`은 Git에서 제외합니다. 후보를 선택하면 등록 양식만 채웁니다. 구현은 동일 워크스페이스의 GateDock SSH·터미널 패턴을 참고했습니다.
-
-## 개선 과제
-
-2026-10-08 커밋 `3606c39`의 코드 검토 결과입니다. Go 소스와 같은 버전의 의존 라이브러리 소스를 읽고 확인했습니다. 실행 재현과 부하 측정은 하지 않았으며, 영향 규모를 측정하지 않은 항목에는 **추정**을 붙였습니다. SSO/RBAC·HA 등 이미 정리된 운영 범위는 [검증 범위와 운영 과제](docs/production-readiness.md)에 있습니다.
-
-P1 두 항목은 수정했습니다.
-
-- **SSH jump 경유 deadline**: 모든 jump 연결에 같은 deadline 브리지를 적용합니다. 이전에는 MySQL·Oracle만 적용했고, Redis는 jump 경유 수집이 매번 실패했으며 PostgreSQL은 응답이 멈추면 수집 제한 시간을 넘겨 대기했습니다. PostgreSQL·Redis도 수집 제한 시간이 끝나면 소켓을 닫습니다. 근거: [ssh.go:168](control-plane/ssh.go#L168), [jump_test.go](control-plane/jump_test.go)
-- **test 모드 인증 해제 제한**: `MONITORING_MODE=test`는 `testseed` 테스트 빌드이거나 루프백 리슨 주소일 때만 시작합니다. `CONTROL_ALLOWED_ORIGINS`가 필요하고, 인증이 꺼졌다는 경고를 남깁니다. 허용 origin의 Host로 들어온 요청만 처리해 DNS rebinding으로 인증 없는 API를 읽지 못하게 합니다. 근거: [service.go:344](control-plane/service.go#L344), [web.go:153](control-plane/web.go#L153)
-
-| 우선 | 개선할 점 | 제안 | 근거 |
-| --- | --- | --- | --- |
-| P2 | 15초마다 모든 대상의 수집을 한꺼번에 시작합니다. 35초 제한 시간은 슬롯을 기다리는 동안에도 줄어들고, 대기 중에 시간이 끝나면 상태·관측 기록 없이 수집이 빠집니다. | 대기 예산과 수집 예산을 분리합니다. 대상별 시작 시각을 분산하고, 건너뛴 수집을 기록하고, 동시 수를 설정값으로 바꿉니다. | [service.go:321](control-plane/service.go#L321), [collect.go:34](control-plane/collect.go#L34) |
-| P2 | 관측 시각이 수집을 끝낸 시각으로 기록됩니다. 그래서 수집 지연이나 건너뜀으로 간격이 1.5주기를 넘으면 ‘지속’ 조건 규칙이 끊깁니다. | 예약된 틱 시각을 기록합니다. 빠진 틱은 미수집 표본으로 명시합니다. | [rules.js:8](control-plane/web/lib/rules.js#L8) |
-| P2 | 키가 맞지 않거나 손상된 행이 하나라도 있으면 등록 목록 API 전체가 실패하고 수집도 멈춥니다. 하지만 `/api/health`는 항상 `ok`를 반환합니다. | 시작할 때 키를 검증합니다. 손상된 행만 격리하고, DB·복호화·마지막 수집 시각을 확인하는 `/api/ready`를 추가합니다. | [store.go:106](control-plane/store.go#L106), [web.go:129](control-plane/web.go#L129) |
-| P2 | 스냅샷 캐시 락을 SQLite 조회와 계열 계산이 끝날 때까지 잡고 있습니다. SQLite 연결이 1개라 읽기와 쓰기도 직렬화됩니다. | 같은 키의 요청만 하나로 합치고 계산은 락 밖에서 합니다. 읽기 연결과 쓰기 연결을 분리합니다. | [snapshot.go:158](control-plane/snapshot.go#L158), [store.go:66](control-plane/store.go#L66) |
-| P2 | 화면을 갱신할 때마다 전체 스냅샷을 다시 JSON으로 만들고 압축합니다. ETag/304가 없고 응답 크기는 측정하지 않았습니다. | 인코딩된 바이트를 캐시하고, 최신 관측 시각을 ETag로 씁니다. 증분 응답이나 선택한 대상만 조회하는 방식도 검토합니다. | [worker.js:6](control-plane/web/worker.js#L6), [snapshot.go:161](control-plane/snapshot.go#L161) |
-| P2 | 보존 정리는 시작 60분 뒤에 처음 실행되고 오류를 무시합니다. 재시작이 반복되면 15일 보존이 지켜지지 않을 수 있습니다. | 시작 직후 한 번 실행하고, 결과를 로그로 남기고, 점진적 VACUUM을 적용합니다. | [service.go:331](control-plane/service.go#L331), [store.go:343](control-plane/store.go#L343) |
-| P2 | 6시간·24시간 그래프는 버킷마다 마지막 표본 하나만 써서 짧은 급등이 보이지 않습니다. | 버킷별 최소·최대·평균을 저장하고 밴드로 표시합니다. 집계 방식도 화면에 표시합니다. | [store.go:295](control-plane/store.go#L295) |
-| P2 | 모든 대상의 원시 값 1시간 이력을 메모리에 보관하지만, 실제로 쓰는 곳은 애플리케이션 수집뿐입니다. 대상을 삭제해도 메모리 상태가 남습니다. 메모리 규모는 추정입니다. | 애플리케이션에 필요한 키만 보관하고, 삭제할 때 메모리 상태를 정리합니다. | [collect.go:113](control-plane/collect.go#L113), [service.go:144](control-plane/service.go#L144) |
-| P2 | 한 건만 조회할 때도 전체 등록 정보를 복호화합니다. 대상이 N개면 주기당 복호화 작업이 약 N²에 비례합니다(추정). | `WHERE id=?`로 한 건만 조회하고, 복호화한 레지스트리를 캐시해 쓰기 시 무효화합니다. | [store.go:93](control-plane/store.go#L93), [store.go:127](control-plane/store.go#L127) |
-| P2 | 실행 중 로그와 수집기 자체 지표가 없고, 수집 오류는 버려집니다. CI가 없고 스케줄러·보존 정리·OS 출력 파서·Redis 수집의 단위 테스트도 없습니다. | `log/slog` 로그와 인증된 수집기 지표를 추가합니다. GitHub Actions에서 `go vet`과 `go test -race`를 실행합니다. | [service.go:326](control-plane/service.go#L326) |
-| P3 | 비밀번호가 있어도 Redis TLS 기본값은 평문입니다. Go가 직접 TLS를 제공할 때 HSTS가 없고, 인증서는 시작할 때만 읽습니다. | 평문 자격 증명을 저장할 때 경고하고, HSTS와 인증서 재로딩을 추가합니다. | [collect.go:433](control-plane/collect.go#L433) |
-| P3 | 터미널에 유휴 제한이 없습니다. 서비스 종료 시 `terminal.close` 감사가 유실될 수 있고, 인증 실패를 제한하지 않습니다. | 유휴 시간 제한, 종료 시 세션 정리·감사 기록, 인증 실패 지연을 추가합니다. | [terminal.go:126](control-plane/terminal.go#L126), [terminal.go:97](control-plane/terminal.go#L97) |
-| P3 | 암호문에 키 버전이 없고, WAL을 쓰는 동안 안전하게 백업하는 명령이 없습니다. | 키 버전 접두어와 키 교체 명령, `VACUUM INTO` 백업 명령과 복구 절차를 제공합니다. | [store.go:82](control-plane/store.go#L82) |
-
-## 개발과 검증
-
-Go 1.27 이상을 사용합니다. 프런트 파일은 `control-plane/web/`, 수집·등록·터미널은 `control-plane/*.go`에 있습니다. **프런트 설치나 빌드 단계는 없습니다.** xterm 6.0.0과 addon-fit 0.11.0의 배포용 ES 모듈만 MIT 라이선스와 SHA-256 목록을 함께 보관합니다.
-
-```sh
-sh scripts/build-verified.sh
-# 실행 예시: 빈 로컬 등록 저장소, 자동 대상 등록 없음
-MONITORING_MODE=test CONTROL_LISTEN=127.0.0.1:13000 \
-CONTROL_DATA_DIR=.local/data \
-CONTROL_ALLOWED_ORIGINS=http://localhost:13000,http://127.0.0.1:13000 \
-.local/bin/pulse-ops
-```
-
-Go 파일과 정적 파일을 수정한 뒤 Go를 다시 빌드하면 됩니다. 실행 파일에는 정적 파일이 포함되어 다른 작업 폴더에서도 실행할 수 있습니다. 기본 실행은 운영 설정이 없으면 시작을 거부합니다. `MONITORING_MODE=test`는 운영자 인증을 끄므로 루프백 `CONTROL_LISTEN`(또는 테스트 Compose의 `testseed` 빌드)에서만 시작하고, `CONTROL_ALLOWED_ORIGINS`의 Host로 들어온 요청만 처리합니다.
-
-```sh
-cd control-plane
-go test -race ./...
-go vet ./...
-cd ..
-python tests/ssh-discovery.test.py
-python scripts/verify-live.py
-```
-
-테스트 Compose의 [브라우저 회귀 검사](http://localhost:13000/__tests__/)는 일반 브라우저에서 순수 JS 지표·규칙·차트 상태 검사를 실행합니다. 운영에는 이 경로가 없습니다. Go 통합 검사는 격리 Compose 내부에서만 실행합니다. `PULSE_TEST_CONTROL=http://127.0.0.1:7080`, `PULSE_TEST_DATABASES=true`, `PULSE_TEST_SSH_JUMP=true`로 실제 DB/SSH/PTY·키·jump·티켓·리사이즈와 PostgreSQL·Redis의 jump 경유 수집을 검증합니다. [최신 검증 기록](docs/native-web-verification.md)을 확인하세요.
-
-전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`, Cloudflare 구성 예시는 `python3 scripts/render-cloudflare-flow.py`로 다시 생성합니다. 세 스크립트는 표준 라이브러리만 사용하며 각각 라이트·다크 SVG를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
+| 설치·운영 배포·개발 | [설치 안내](docs/setup.md) |
+| 인프라 연결·그래프·메신저 설정 | [사용 가이드](docs/user-guide.md) |
+| 앱 요청량·오류율·P99 계측 | [애플리케이션 계측](docs/application-metrics.md) |
+| 검증 범위·운영 과제 | [검증 기록](docs/native-web-verification.md) · [운영 과제](docs/production-readiness.md) · [코드 검토](docs/code-review.md) |
