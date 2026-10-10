@@ -25,10 +25,15 @@ HTTPS는 Go의 인증서 설정 또는 이미 운영하는 HTTPS 앞단을 사�
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="images/cloudflare-traffic-flow-dark.svg">
-  <img alt="Cloudflare 구성 예시 애니메이션: DNS 조회, CDN 캐시 HIT, Nginx·백엔드·Redis·DB 요청과 500 반환, Pulse Ops의 내부 지표 수집, 관리 화면 조회를 순서대로 보여 줍니다. Cloudflare API 연결은 연동 예정이며 모든 수치는 가상의 5분 표본입니다." src="images/cloudflare-traffic-flow.svg" width="100%">
+  <img alt="서비스 요청 3단계: 접속·캐시, API·DB 처리, 500 오류 응답. 모든 수치는 가상 예시값입니다." src="images/cloudflare-traffic-flow.svg" width="100%">
 </picture>
 
-40초 반복 영상은 **접속·캐시 응답 → API·DB 처리 → 500 오류 응답 → 내부 지표 수집 → 통합 화면 예시**의 5단계입니다. DNS 조회와 캐시 응답은 첫 장면에 함께 표시합니다. 수치·속도는 설명용 가상값이며, ‘동작 줄이기’ 설정에서는 정지 화면을 표시합니다.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/pulse-observation-flow-dark.svg">
+  <img alt="운영 관측 2단계: 지표 수집과 통합 화면 조회. Cloudflare API 연결은 연동 예정입니다." src="images/pulse-observation-flow.svg" width="100%">
+</picture>
+
+두 영상은 각각 20초로 반복합니다. **서비스 요청**은 접속·캐시 → API·DB → 오류 응답의 3단계, **운영 관측**은 지표 수집 → 통합 화면의 2단계입니다. 수치·속도는 설명용 가상값이며, ‘동작 줄이기’ 설정에서는 정지 화면을 표시합니다.
 
 | 가상의 5분 표본 | 예시값 | 관계 |
 | --- | --- | --- |

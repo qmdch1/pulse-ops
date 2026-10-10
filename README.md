@@ -26,9 +26,18 @@ docker compose -f compose.test.yml --profile dashboard up -d --build
 
 ## Cloudflare DNS·프록시 구성 예시
 
+**서비스 요청** · 접속·캐시 → API·DB → 오류 응답
+
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/cloudflare-traffic-flow-dark.svg">
-  <img alt="Cloudflare·Nginx를 통과하는 서비스 요청과 Pulse Ops의 내부 지표 수집 흐름. 가상 예시값이며 Cloudflare API는 연동 예정입니다." src="docs/images/cloudflare-traffic-flow.svg" width="100%">
+  <img alt="서비스 요청 3단계: 접속·캐시 응답, Nginx·API·DB 처리, 500 오류 반환. 가상 예시값입니다." src="docs/images/cloudflare-traffic-flow.svg" width="100%">
+</picture>
+
+**운영 관측** · 지표 수집 → 통합 화면
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/pulse-observation-flow-dark.svg">
+  <img alt="운영 관측 2단계: Pulse Ops가 앱·DB·Redis·SSH 지표를 수집하고 관리 화면에서 조회합니다. Cloudflare API는 연동 예정입니다." src="docs/images/pulse-observation-flow.svg" width="100%">
 </picture>
 
 Cloudflare·Nginx를 사용하는 배치 예시입니다. **수치는 가상값이며, Cloudflare API 연결은 연동 예정**입니다. [구조·수집 방식 자세히 보기](docs/architecture.md)

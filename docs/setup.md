@@ -79,4 +79,4 @@ python scripts/verify-live.py
 
 테스트 Compose의 [브라우저 회귀 검사](http://localhost:13000/__tests__/)는 일반 브라우저에서 순수 JS 지표·규칙·차트 상태 검사를 실행합니다. 운영에는 이 경로가 없습니다. Go 통합 검사는 격리 Compose 내부에서만 실행합니다. `PULSE_TEST_CONTROL=http://127.0.0.1:7080`, `PULSE_TEST_DATABASES=true`, `PULSE_TEST_SSH_JUMP=true`로 실제 DB/SSH/PTY·키·jump·티켓·리사이즈와 PostgreSQL·Redis의 jump 경유 수집을 검증합니다. [최신 검증 기록](native-web-verification.md)을 확인하세요.
 
-전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`, Cloudflare 구성 예시는 `python3 scripts/render-cloudflare-flow.py`로 다시 생성합니다. 세 스크립트는 표준 라이브러리만 사용하며 각각 라이트·다크 SVG를 `docs/images/`에 씁니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
+전체 구조도는 `python3 scripts/render-architecture.py`, 애플리케이션 계측 구조도는 `python3 scripts/render-metrics-flow.py`, 서비스 요청·운영 관측 예시는 `python3 scripts/render-cloudflare-flow.py`로 다시 생성합니다. 세 스크립트는 표준 라이브러리만 사용하며 라이트·다크 SVG를 `docs/images/`에 씁니다. Cloudflare 스크립트는 3단계 서비스 요청과 2단계 운영 관측을 별도 파일로 만듭니다. SVG는 스크립트 없이 SMIL로 움직이므로 README의 `<img>`에서도 재생됩니다. 문서 이미지 생성 도구는 제품의 빌드·실행 의존성이 아닙니다.
