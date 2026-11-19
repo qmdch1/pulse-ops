@@ -24,6 +24,18 @@ docker compose -f compose.test.yml --profile dashboard up -d --build
 
 인프라는 등록 후 **연결 시작**, 알림은 환경설정에서 **테스트 전송 → 자동 알림 활성화**를 선택합니다. 앱의 오류율·P99는 각 인스턴스에 [`/metrics` 계측](docs/application-metrics.md)이 필요합니다.
 
+### 설치
+
+소스 빌드 없이 릴리스 산출물로 실행할 수 있습니다. 운영 환경 변수는 [운영 배포](docs/setup.md#운영-배포)와 같습니다.
+
+- **컨테이너 이미지** — `ghcr.io/qmdch1/pulse-ops` (amd64·arm64, `latest`·`3.0.0`·`3.0` 형식 태그). `.env.prod`에 `PULSE_OPS_VERSION`을 지정한 뒤 운영 Compose에 `compose.release.yml`을 겹쳐 실행합니다.
+
+  ```sh
+  docker compose --env-file .env.prod -f compose.prod.yml -f compose.release.yml up -d
+  ```
+
+- **실행 파일** — [Releases](https://github.com/qmdch1/pulse-ops/releases)의 `pulse-ops_<버전>_<os>_<arch>` 압축 파일(windows/amd64 `.zip`, linux/amd64·linux/arm64·darwin/arm64 `.tar.gz`)과 `SHA256SUMS`. 단일 실행 파일에 화면이 포함되어 있으며, `CONTROL_DATA_DIR`(기본 `./data`)에 SQLite 저장소를 만듭니다.
+
 ## Cloudflare DNS·프록시 구성 예시
 
 **서비스 요청** · 접속·캐시 → API·DB → 오류 응답

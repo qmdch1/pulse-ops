@@ -1,0 +1,10 @@
+# Run the published GHCR image instead of building from source.
+# Use together with compose.prod.yml, which keeps the security settings:
+#   docker compose --env-file .env.prod -f compose.prod.yml -f compose.release.yml pull
+#   docker compose --env-file .env.prod -f compose.prod.yml -f compose.release.yml up -d
+# Pin PULSE_OPS_VERSION (e.g. 3.0.0) in .env.prod; "latest" follows the newest release.
+services:
+  control-plane:
+    image: ghcr.io/qmdch1/pulse-ops:${PULSE_OPS_VERSION:-latest}
+    build: !reset null
+    pull_policy: missing
